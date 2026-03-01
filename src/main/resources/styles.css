@@ -1,0 +1,92 @@
+/*
+ * DesignLint CSS Stylesheet
+ *
+ * JavaFX supports CSS styling similar to web CSS, but with -fx- prefixed properties.
+ * This is one of the biggest improvements over Swing, where styling required
+ * verbose Java code and custom renderers.
+ */
+
+/* Base styling for the entire application */
+.root {
+    -fx-font-family: "System";
+    -fx-font-size: 13px;
+    -fx-background-color: #ffffff;
+}
+
+/* Toolbar */
+.tool-bar {
+    -fx-background-color: #f5f5f5;
+    -fx-border-color: #e0e0e0;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 6 10 6 10;
+}
+
+/* Buttons */
+.button {
+    -fx-background-color: #4a90d9;
+    -fx-text-fill: white;
+    -fx-background-radius: 4;
+    -fx-padding: 5 12 5 12;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-background-color: #357abd;
+}
+
+.button:pressed {
+    -fx-background-color: #2a5f99;
+}
+
+.button:disabled {
+    -fx-background-color: #cccccc;
+    -fx-text-fill: #888888;
+}
+
+/* List Views (for classes and guidelines) */
+.list-view {
+    -fx-border-color: #d0d0d0;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+.list-cell {
+    -fx-padding: 4 8 4 8;
+}
+
+.list-cell:selected {
+    -fx-background-color: #e3f0ff;
+    -fx-text-fill: #333333;
+}
+
+/* Split pane divider */
+.split-pane > .split-pane-divider {
+    -fx-background-color: #e0e0e0;
+    -fx-padding: 0 2 0 2;
+}
+
+/* ScrollPane */
+.scroll-pane {
+    -fx-border-color: #d0d0d0;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+/* Labels */
+.label {
+    -fx-text-fill: #333333;
+}
+
+/* Tooltips */
+.tooltip {
+    -fx-background-color: #333333;
+    -fx-text-fill: white;
+    -fx-background-radius: 3;
+    -fx-padding: 6 10 6 10;
+    -fx-font-size: 12px;
+}
+
+/* Separator */
+.separator > .line {
+    -fx-border-color: #e0e0e0;
+}

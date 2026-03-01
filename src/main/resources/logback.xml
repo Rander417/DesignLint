@@ -1,0 +1,20 @@
+<!-- Logback Configuration for DesignLint -->
+<!-- SootUp uses SLF4J internally and can be quite chatty. -->
+<!-- This config keeps things clean: only warnings from SootUp, info from our code. -->
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- SootUp is verbose at DEBUG/INFO — only show warnings and errors -->
+    <logger name="sootup" level="WARN" />
+
+    <!-- Our code at INFO level -->
+    <logger name="designlint" level="INFO" />
+
+    <root level="WARN">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>
