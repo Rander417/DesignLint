@@ -4,8 +4,14 @@ import designlint.core.AnalysisEngine;
 import designlint.core.ClassLoadingService;
 import designlint.core.DesignGuideline;
 import designlint.guidelines.CloneableCheck;
+import designlint.guidelines.CovariantEqualsCheck;
+import designlint.guidelines.CompareToEqualsCheck;
+import designlint.guidelines.EmptyCatchCheck;
 import designlint.guidelines.EqualsHashCodeCheck;
 import designlint.guidelines.EqualsPatternCheck;
+import designlint.guidelines.FinalizeCheck;
+import designlint.guidelines.SerializableCheck;
+import designlint.guidelines.ToStringCheck;
 import designlint.ui.MainWindow;
 
 import javafx.application.Application;
@@ -60,9 +66,18 @@ public class DesignLintApp extends Application {
      */
     private List<DesignGuideline> createGuidelines() {
         return List.of(
+                // Original three checks (from the 2002 requirements)
                 new CloneableCheck(),
                 new EqualsHashCodeCheck(),
-                new EqualsPatternCheck()
+                new EqualsPatternCheck(),
+                // Classic Java pitfalls
+                new SerializableCheck(),
+                new CovariantEqualsCheck(),
+                new FinalizeCheck(),
+                new CompareToEqualsCheck(),
+                new ToStringCheck(),
+                // Code quality — body-level analysis
+                new EmptyCatchCheck()
         );
     }
 
