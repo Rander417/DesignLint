@@ -6,6 +6,8 @@ import designlint.core.DesignGuideline;
 import designlint.core.Severity;
 import sootup.core.model.SootClass;
 
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
@@ -15,52 +17,57 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.CheckBoxListCell;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.scene.text.Text;
-import javafx.scene.text.TextFlow;
 import javafx.stage.DirectoryChooser;
-import javafx.stage.FileChooser;
 import javafx.stage.Stage;
-import javafx.beans.property.SimpleBooleanProperty;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * The main window for DesignLint.
  *
- * === JAVAFX CONCEPTS (coming from Python/Tkinter or Swing) ===
+ * === EVOLUTION ===
  *
- * JavaFX uses a "scene graph" — a tree of UI nodes. Key concepts:
+ * Phase 1: Severity-aware color coding and summary banner
+ * Phase 2: Filter toggles and sort controls
+ * Phase 3: TreeView + TableView with view toggle (this version)
  *
- * - Stage: the window itself (like a JFrame in Swing, or Tk() in Tkinter)
- * - Scene: the content inside a window
- * - Node: any UI element — buttons, labels, text fields, containers, etc.
- * - Layout Panes: containers that arrange child nodes (VBox = vertical, HBox = horizontal,
- *   BorderPane = top/bottom/left/right/center, SplitPane = resizable split)
- * - Controls: interactive widgets (Button, ListView, CheckBox, TextArea, etc.)
- * - ObservableList: a list that automatically notifies the UI when items change
- *   (similar to Python's tkinter StringVar, but for collections)
- * - Properties: values that support binding and change listeners
+ * === PHASE 3 ARCHITECTURE ===
  *
- * CSS styling is supported natively — you can style JavaFX apps with .css files,
- * which is much cleaner than Swing's programmatic look-and-feel system.
+ * The results area is now a StackPane that holds one of three display components:
  *
- * === RESULTS DISPLAY (Phase 1 & 2 enhancements) ===
+ *   - TreeView: Classes as expandable nodes, violations as children, passes collapsed
+ *     into a summary. Best for "what's wrong with THIS class?" workflows. Each class
+ *     node shows inline severity counts and a colored left border for worst severity.
  *
- * Results are now severity-aware:
- *   - Color-coded by severity: ERROR (red), WARNING (amber), ADVISORY (blue)
- *   - Summary banner shows counts at a glance
- *   - Filter toggles let users show/hide by severity level and passes
- *   - Sorting by severity-first (errors float to top) or class-first (original behavior)
+ *   - TableView: Flat sortable table with columns for severity, class, guideline,
+ *     and message. Best for "show me ALL warnings across ALL classes" workflows.
+ *     Click column headers to sort.
  *
- * The key architectural change: results are stored after analysis so that filter/sort
- * changes can re-render without re-running analysis. The refreshResults() method reads
- * from this stored list and applies the current filter/sort state.
+ * The view is controlled by toggle buttons in the filter bar. Switching views
+ * re-renders from stored results without re-running analysis.
+ *
+ * === JAVAFX CONCEPTS FOR PHASE 3 ===
+ *
+ * TreeView<T>: A hierarchical list control. Each node is a TreeItem<T> which can
+ * have children. TreeCells render each visible node. Unlike Swing JTree which uses
+ * a TreeModel, JavaFX uses a simple parent-child TreeItem structure.
+ *
+ * TreeCell: The visual representation of one TreeItem. A cell factory creates these.
+ * IMPORTANT: cells are RECYCLED — the same cell object renders different items as
+ * you scroll. The updateItem() method must handle this by clearing state when the
+ * item is null or empty, and fully rebuilding the visual for each new item.
+ *
+ * TableView<T>: A sortable, column-based grid. Each column has a cellValueFactory
+ * (extracts data from the row object) and optionally a cellFactory (custom rendering).
+ * Columns are sortable by clicking headers — JavaFX handles the sort UI automatically.
+ *
+ * StackPane: A layout that stacks children on top of each other. Only the visible
+ * child is shown. We use this to swap between TreeView and TableView in the same
+ * space without rearranging the layout.
  */
 public class MainWindow {
 
@@ -70,41 +77,44 @@ public class MainWindow {
     // --- UI Components ---
     private ListView<ClassItem> classListView;
     private ListView<GuidelineItem> guidelineListView;
-    private TextFlow resultsDisplay;
-    private ScrollPane resultsScrollPane;
     private Label statusBar;
     private Button loadButton;
     private Button analyzeButton;
 
-    // --- Results display: summary, filter, and sort controls (Phase 1 & 2) ---
+    // --- Results display: summary, filter, sort, and view controls ---
     private HBox summaryBar;
     private ToggleButton filterError;
     private ToggleButton filterWarning;
     private ToggleButton filterAdvisory;
     private ToggleButton filterPasses;
     private ToggleButton sortBySeverity;
+    private ToggleButton viewTreeToggle;
+    private ToggleButton viewTableToggle;
+
+    // --- Results area: swappable views in a StackPane ---
+    private StackPane resultsContainer;
+    private TreeView<Object> resultsTreeView;
+    private TableView<TableRowData> resultsTableView;
 
     /** Stored results from the last analysis run, used for re-filtering/sorting. */
     private List<AnalysisResult> lastResults = List.of();
 
     // --- Severity color palette ---
-    // These are used in Java code for TextFlow rendering. Matching CSS classes
-    // exist in styles.css for the toggle buttons and summary badges.
-    private static final Color COLOR_ERROR      = Color.web("#c62828");   // deep red
-    private static final Color COLOR_ERROR_ICON = Color.web("#d32f2f");   // brighter red for icon
-    private static final Color COLOR_WARN       = Color.web("#e65100");   // deep amber
-    private static final Color COLOR_WARN_ICON  = Color.web("#f57c00");   // brighter amber for icon
-    private static final Color COLOR_ADVISORY      = Color.web("#1565c0");   // deep blue
-    private static final Color COLOR_ADVISORY_ICON = Color.web("#1976d2");   // brighter blue for icon
-    private static final Color COLOR_PASS       = Color.web("#2e7d32");   // deep green
-    private static final Color COLOR_PASS_ICON  = Color.web("#388e3c");   // brighter green for icon
-    private static final Color COLOR_CLASS_HDR  = Color.web("#1a237e");   // dark indigo for class names
+    private static final String HEX_ERROR      = "#c62828";
+    private static final String HEX_ERROR_ICON = "#d32f2f";
+    private static final String HEX_WARN       = "#e65100";
+    private static final String HEX_WARN_ICON  = "#f57c00";
+    private static final String HEX_ADV        = "#1565c0";
+    private static final String HEX_ADV_ICON   = "#1976d2";
+    private static final String HEX_PASS       = "#2e7d32";
+    private static final String HEX_PASS_ICON  = "#388e3c";
+    private static final String HEX_CLASS_HDR  = "#1a237e";
 
-    /**
-     * Wrapper class for classes shown in the ListView.
-     * Tracks the class name, whether it's user-selected, and whether the user
-     * has checked it for analysis.
-     */
+    // ==================================================================================
+    // Inner types: data wrappers for the left-panel lists and result views
+    // ==================================================================================
+
+    /** Wrapper for classes shown in the loaded-classes ListView. */
     private static class ClassItem {
         final String className;
         final boolean isUserSelected;
@@ -121,9 +131,7 @@ public class MainWindow {
         }
     }
 
-    /**
-     * Wrapper for guidelines in the checkbox list.
-     */
+    /** Wrapper for guidelines in the guideline-selection ListView. */
     private static class GuidelineItem {
         final DesignGuideline guideline;
         final SimpleBooleanProperty selected = new SimpleBooleanProperty(true);
@@ -137,6 +145,71 @@ public class MainWindow {
             return guideline.name();
         }
     }
+
+    // --- TreeView node types ---
+    // These are the data objects stored in TreeItem<Object>. The tree cell factory
+    // uses instanceof to decide how to render each one.
+
+    /**
+     * Data for a class-level tree node. Holds the class name plus pre-computed
+     * severity counts so the cell factory doesn't have to recount every render.
+     */
+    private record ClassNodeData(
+            String className,
+            int errorCount,
+            int warningCount,
+            int advisoryCount,
+            int passCount
+    ) {
+        /** The worst (most critical) severity present in this class's results. */
+        String worstSeverityColor() {
+            if (errorCount > 0) return HEX_ERROR_ICON;
+            if (warningCount > 0) return HEX_WARN_ICON;
+            if (advisoryCount > 0) return HEX_ADV_ICON;
+            return HEX_PASS_ICON;
+        }
+    }
+
+    /** Data for a violation child node in the tree. */
+    private record ViolationNodeData(AnalysisResult.Violation violation) {}
+
+    /** Data for the collapsible "N checks passed" summary node. */
+    private record PassSummaryData(int count) {}
+
+    /** Data for an individual pass detail (child of PassSummaryData). */
+    private record PassDetailData(String guidelineName) {}
+
+    // --- TableView row type ---
+    /**
+     * Flat row for the TableView. We pre-extract fields from AnalysisResult so that
+     * TableColumn cell value factories are simple property lookups.
+     */
+    private record TableRowData(
+            String severity,       // "ERROR", "WARNING", "ADVISORY", "PASS"
+            int severityOrder,     // 0, 1, 2, 3 — for sorting
+            String className,
+            String guideline,
+            String message
+    ) {
+        static TableRowData from(AnalysisResult result) {
+            if (result instanceof AnalysisResult.Violation v) {
+                return new TableRowData(
+                        v.severity().name(),
+                        v.severity().ordinal(),
+                        v.className(),
+                        v.guidelineName(),
+                        v.message()
+                );
+            } else if (result instanceof AnalysisResult.Pass p) {
+                return new TableRowData("PASS", 3, p.className(), p.guidelineName(), "OK");
+            }
+            throw new IllegalArgumentException("Unknown result type: " + result);
+        }
+    }
+
+    // ==================================================================================
+    // Construction and UI building
+    // ==================================================================================
 
     public MainWindow(Stage stage, AnalysisEngine engine) {
         this.stage = stage;
@@ -181,10 +254,8 @@ public class MainWindow {
         guidelineLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
 
         guidelineListView = new ListView<>();
-        guidelineListView.setCellFactory(CheckBoxListCell.forListView(item -> item.selected));
         guidelineListView.setPrefHeight(150);
 
-        // Populate guidelines from the engine
         ObservableList<GuidelineItem> guidelineItems = FXCollections.observableArrayList(
                 engine.getAvailableGuidelines().stream()
                         .map(GuidelineItem::new)
@@ -211,63 +282,77 @@ public class MainWindow {
         leftPanel.setPadding(new Insets(8));
         leftPanel.setPrefWidth(350);
 
-        // === RIGHT PANEL: Results display with filter controls ===
+        // === RIGHT PANEL: Results ===
         Label resultsLabel = new Label("Analysis Results:");
         resultsLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
 
-        // --- Summary banner (Phase 1) ---
-        // Shows at-a-glance counts like: "● 3 Errors  ● 7 Warnings  ● 2 Advisories  ✓ 12 Passes"
+        // --- Summary banner ---
         summaryBar = new HBox(6);
         summaryBar.setAlignment(Pos.CENTER_LEFT);
         summaryBar.setPadding(new Insets(6, 10, 6, 10));
         summaryBar.getStyleClass().add("summary-bar");
-        summaryBar.setVisible(false);    // hidden until first analysis
-        summaryBar.setManaged(false);    // don't take up layout space when hidden
+        summaryBar.setVisible(false);
+        summaryBar.setManaged(false);
 
-        // --- Filter & sort controls (Phase 2) ---
-        // ToggleButtons act as on/off switches: pressed = showing that category.
-        // All start "selected" (pressed) so everything is visible by default.
+        // --- Filter, sort, and view controls ---
         filterError = createFilterToggle("Errors", "filter-error");
         filterWarning = createFilterToggle("Warnings", "filter-warning");
         filterAdvisory = createFilterToggle("Advisories", "filter-advisory");
         filterPasses = createFilterToggle("Passes", "filter-pass");
 
-        // Sort toggle: unpressed = group by class (default), pressed = severity first
         sortBySeverity = new ToggleButton("Sort by Severity");
-        sortBySeverity.getStyleClass().add("filter-toggle");
-        sortBySeverity.getStyleClass().add("sort-toggle");
+        sortBySeverity.getStyleClass().addAll("filter-toggle", "sort-toggle");
         sortBySeverity.setSelected(false);
         sortBySeverity.setTooltip(new Tooltip(
-                "Off: group results by class name\nOn: errors first, then warnings, advisories, passes"));
+                "Tree: most-problematic classes first\nTable: severity column sort"));
         sortBySeverity.setOnAction(e -> refreshResults());
+
+        // View toggle — mutually exclusive via a ToggleGroup
+        ToggleGroup viewGroup = new ToggleGroup();
+        viewTreeToggle = new ToggleButton("Tree View");
+        viewTreeToggle.getStyleClass().addAll("filter-toggle", "view-toggle");
+        viewTreeToggle.setToggleGroup(viewGroup);
+        viewTreeToggle.setSelected(true);
+        viewTreeToggle.setOnAction(e -> {
+            // Prevent deselecting the active view (ToggleGroup allows it by default)
+            if (!viewTreeToggle.isSelected()) viewTreeToggle.setSelected(true);
+            else refreshResults();
+        });
+
+        viewTableToggle = new ToggleButton("Table View");
+        viewTableToggle.getStyleClass().addAll("filter-toggle", "view-toggle");
+        viewTableToggle.setToggleGroup(viewGroup);
+        viewTableToggle.setOnAction(e -> {
+            if (!viewTableToggle.isSelected()) viewTableToggle.setSelected(true);
+            else refreshResults();
+        });
 
         Label showLabel = new Label("Show:");
         showLabel.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
+        Label viewLabel = new Label("View:");
+        viewLabel.setStyle("-fx-text-fill: #666666; -fx-font-size: 11px;");
 
         HBox filterBar = new HBox(6,
-                showLabel,
-                filterError, filterWarning, filterAdvisory, filterPasses,
+                showLabel, filterError, filterWarning, filterAdvisory, filterPasses,
                 new Separator(Orientation.VERTICAL),
-                sortBySeverity
+                sortBySeverity,
+                new Separator(Orientation.VERTICAL),
+                viewLabel, viewTreeToggle, viewTableToggle
         );
         filterBar.setAlignment(Pos.CENTER_LEFT);
         filterBar.setPadding(new Insets(4, 8, 4, 8));
         filterBar.getStyleClass().add("filter-bar");
 
-        // --- Results TextFlow ---
-        resultsDisplay = new TextFlow();
-        resultsDisplay.setPadding(new Insets(8));
-        resultsDisplay.setLineSpacing(4);
+        // --- Results container: StackPane holds the active view ---
+        resultsTreeView = createTreeView();
+        resultsTableView = createTableView();
 
-        resultsScrollPane = new ScrollPane(resultsDisplay);
-        resultsScrollPane.setFitToWidth(true);
-        VBox.setVgrow(resultsScrollPane, Priority.ALWAYS);
+        resultsContainer = new StackPane(resultsTreeView, resultsTableView);
+        resultsTableView.setVisible(false);  // tree is default
+        VBox.setVgrow(resultsContainer, Priority.ALWAYS);
 
         VBox rightPanel = new VBox(8,
-                resultsLabel,
-                summaryBar,
-                filterBar,
-                resultsScrollPane
+                resultsLabel, summaryBar, filterBar, resultsContainer
         );
         rightPanel.setPadding(new Insets(8));
 
@@ -287,7 +372,7 @@ public class MainWindow {
         root.setCenter(splitPane);
         root.setBottom(statusBar);
 
-        Scene scene = new Scene(root, 1000, 700);
+        Scene scene = new Scene(root, 1050, 720);
 
         scene.getStylesheets().add(getClass().getResource("/styles.css") != null
                 ? getClass().getResource("/styles.css").toExternalForm()
@@ -298,13 +383,320 @@ public class MainWindow {
         stage.show();
     }
 
+    // ==================================================================================
+    // TreeView setup and cell factory
+    // ==================================================================================
+
     /**
-     * Create a filter toggle button with consistent styling.
+     * Create and configure the TreeView for results display.
      *
-     * ToggleButton is like a checkbox shaped as a button — it stays pressed/unpressed.
-     * Each filter starts selected (showing that category). Clicking toggles visibility
-     * of that result type and re-renders without re-running analysis.
+     * The tree structure is:
+     *   Root (hidden)
+     *   ├── ClassNodeData("com.example.Foo", counts...)
+     *   │   ├── ViolationNodeData(violation1)
+     *   │   ├── ViolationNodeData(violation2)
+     *   │   └── PassSummaryData(3)        ← collapsible
+     *   │       ├── PassDetailData("Cloneable Check")
+     *   │       ├── PassDetailData("Empty Catch Check")
+     *   │       └── PassDetailData("Mutable Static Check")
+     *   └── ClassNodeData("com.example.Bar", counts...)
+     *       └── ...
+     *
+     * The cell factory uses instanceof on the TreeItem's value to decide rendering.
      */
+    private TreeView<Object> createTreeView() {
+        TreeView<Object> tree = new TreeView<>();
+        tree.setShowRoot(false);
+        tree.setRoot(new TreeItem<>());  // invisible root
+
+        tree.setCellFactory(tv -> new TreeCell<>() {
+            @Override
+            protected void updateItem(Object item, boolean empty) {
+                super.updateItem(item, empty);
+
+                // CRITICAL: cells are recycled. Must clear everything for empty/null cells.
+                if (empty || item == null) {
+                    setText(null);
+                    setGraphic(null);
+                    setStyle("");
+                    return;
+                }
+
+                setText(null); // we use graphic exclusively for full control
+
+                if (item instanceof ClassNodeData cn) {
+                    setGraphic(buildClassNodeGraphic(cn));
+                    // Left border colored by worst severity
+                    setStyle("-fx-border-color: transparent transparent transparent " +
+                             cn.worstSeverityColor() + ";" +
+                             "-fx-border-width: 0 0 0 3; -fx-padding: 4 8 4 6;");
+
+                } else if (item instanceof ViolationNodeData vn) {
+                    setGraphic(buildViolationGraphic(vn.violation()));
+                    setStyle("-fx-padding: 2 8 2 4;");
+
+                } else if (item instanceof PassSummaryData ps) {
+                    setGraphic(buildPassSummaryGraphic(ps));
+                    setStyle("-fx-padding: 2 8 2 4;");
+
+                } else if (item instanceof PassDetailData pd) {
+                    setGraphic(buildPassDetailGraphic(pd));
+                    setStyle("-fx-padding: 1 8 1 4;");
+
+                } else {
+                    setGraphic(null);
+                    setStyle("");
+                }
+            }
+        });
+
+        return tree;
+    }
+
+    /**
+     * Build the graphic for a class-level tree node.
+     *
+     * Layout: [package.ClassName] [spacer] [mini error badge] [mini warn badge] ...
+     *
+     * The package name is grayed out, class name is bold indigo. Mini badges on the
+     * right show counts at a glance without expanding.
+     */
+    private HBox buildClassNodeGraphic(ClassNodeData cn) {
+        String fullName = cn.className();
+        int lastDot = fullName.lastIndexOf('.');
+        String pkg = lastDot >= 0 ? fullName.substring(0, lastDot + 1) : "";
+        String simpleName = lastDot >= 0 ? fullName.substring(lastDot + 1) : fullName;
+
+        Label pkgLabel = new Label(pkg);
+        pkgLabel.setStyle("-fx-text-fill: #888888; -fx-font-size: 12px;");
+
+        Label nameLabel = new Label(simpleName);
+        nameLabel.setStyle("-fx-text-fill: " + HEX_CLASS_HDR + "; -fx-font-size: 12px; -fx-font-weight: bold;");
+
+        // Spacer pushes badges to the right
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox row = new HBox(0, pkgLabel, nameLabel, spacer);
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        // Add mini severity count badges (only for non-zero counts)
+        if (cn.errorCount() > 0)    row.getChildren().add(miniBadge(String.valueOf(cn.errorCount()), "mini-badge-error"));
+        if (cn.warningCount() > 0)  row.getChildren().add(miniBadge(String.valueOf(cn.warningCount()), "mini-badge-warning"));
+        if (cn.advisoryCount() > 0) row.getChildren().add(miniBadge(String.valueOf(cn.advisoryCount()), "mini-badge-advisory"));
+        if (cn.passCount() > 0)     row.getChildren().add(miniBadge(String.valueOf(cn.passCount()), "mini-badge-pass"));
+
+        // Give the row enough width for badges to spread out
+        row.setMinWidth(400);
+        row.setPrefWidth(500);
+
+        return row;
+    }
+
+    /** Create a small colored count badge for class node headers. */
+    private Label miniBadge(String text, String styleClass) {
+        Label badge = new Label(text);
+        badge.getStyleClass().addAll("mini-badge", styleClass);
+        badge.setPadding(new Insets(0, 5, 0, 5));
+        HBox.setMargin(badge, new Insets(0, 2, 0, 2));
+        return badge;
+    }
+
+    /**
+     * Build the graphic for a violation child node.
+     * Layout: [icon] [SEVERITY tag] [guideline name] [message]
+     */
+    private HBox buildViolationGraphic(AnalysisResult.Violation v) {
+        String icon, sevTag, hexIcon, hexText, bgHex, borderHex;
+        switch (v.severity()) {
+            case ERROR -> {
+                icon = "\u2717"; sevTag = "ERROR";
+                hexIcon = HEX_ERROR_ICON; hexText = HEX_ERROR;
+                bgHex = "#ffebee"; borderHex = "#ef9a9a";
+            }
+            case WARNING -> {
+                icon = "\u26a0"; sevTag = "WARNING";
+                hexIcon = HEX_WARN_ICON; hexText = HEX_WARN;
+                bgHex = "#fff3e0"; borderHex = "#ffcc80";
+            }
+            case ADVISORY -> {
+                icon = "\u2139"; sevTag = "ADVISORY";
+                hexIcon = HEX_ADV_ICON; hexText = HEX_ADV;
+                bgHex = "#e3f2fd"; borderHex = "#90caf9";
+            }
+            default -> {
+                icon = "\u2717"; sevTag = "ERROR";
+                hexIcon = HEX_ERROR_ICON; hexText = HEX_ERROR;
+                bgHex = "#ffebee"; borderHex = "#ef9a9a";
+            }
+        }
+
+        Label iconLabel = new Label(icon);
+        iconLabel.setStyle("-fx-text-fill: " + hexIcon + "; -fx-font-weight: bold; -fx-font-size: 12px;");
+        iconLabel.setMinWidth(16);
+
+        Label sevLabel = new Label(sevTag);
+        sevLabel.setStyle("-fx-text-fill: " + hexText + "; -fx-font-weight: bold; -fx-font-size: 10px;" +
+                         "-fx-background-color: " + bgHex + "; -fx-background-radius: 3;" +
+                         "-fx-border-color: " + borderHex + "; -fx-border-radius: 3; -fx-border-width: 1;" +
+                         "-fx-padding: 0 4 0 4;");
+
+        Label guideLabel = new Label(v.guidelineName());
+        guideLabel.setStyle("-fx-text-fill: " + hexText + "; -fx-font-weight: bold; -fx-font-size: 12px;");
+
+        Label msgLabel = new Label(v.message());
+        msgLabel.setStyle("-fx-text-fill: #555555; -fx-font-size: 12px;");
+        msgLabel.setWrapText(true);
+
+        HBox row = new HBox(6, iconLabel, sevLabel, guideLabel, msgLabel);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    /** Build the graphic for the "N checks passed" summary node. */
+    private HBox buildPassSummaryGraphic(PassSummaryData ps) {
+        Label icon = new Label("\u2713");
+        icon.setStyle("-fx-text-fill: " + HEX_PASS_ICON + "; -fx-font-weight: bold; -fx-font-size: 12px;");
+        icon.setMinWidth(16);
+
+        String text = ps.count() + " check" + (ps.count() == 1 ? "" : "s") + " passed";
+        Label label = new Label(text);
+        label.setStyle("-fx-text-fill: " + HEX_PASS + "; -fx-font-weight: bold; -fx-font-size: 12px;");
+
+        HBox row = new HBox(6, icon, label);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    /** Build the graphic for an individual pass detail row. */
+    private HBox buildPassDetailGraphic(PassDetailData pd) {
+        Label icon = new Label("\u2713");
+        icon.setStyle("-fx-text-fill: " + HEX_PASS_ICON + "; -fx-font-size: 11px;");
+        icon.setMinWidth(14);
+
+        Label label = new Label(pd.guidelineName());
+        label.setStyle("-fx-text-fill: #66bb6a; -fx-font-size: 11px;");
+
+        HBox row = new HBox(4, icon, label);
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    // ==================================================================================
+    // TableView setup
+    // ==================================================================================
+
+    /**
+     * Create and configure the TableView for flat, sortable results.
+     *
+     * Columns: Severity | Class | Guideline | Message
+     *
+     * The severity column uses a custom cell factory for colored badge rendering.
+     * All columns are sortable by clicking headers — JavaFX handles the sort UI.
+     * The comparator for the severity column uses the numeric severityOrder so that
+     * ERROR sorts before WARNING before ADVISORY before PASS.
+     */
+    @SuppressWarnings("unchecked")
+    private TableView<TableRowData> createTableView() {
+        TableView<TableRowData> table = new TableView<>();
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        table.setPlaceholder(new Label("No results to display."));
+
+        // --- Severity column ---
+        TableColumn<TableRowData, String> sevCol = new TableColumn<>("Severity");
+        sevCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().severity()));
+        sevCol.setComparator(Comparator.comparingInt(s -> {
+            return switch (s) {
+                case "ERROR" -> 0; case "WARNING" -> 1; case "ADVISORY" -> 2; default -> 3;
+            };
+        }));
+        sevCol.setPrefWidth(90);
+        sevCol.setMinWidth(80);
+        sevCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String severity, boolean empty) {
+                super.updateItem(severity, empty);
+                if (empty || severity == null) {
+                    setGraphic(null);
+                    setText(null);
+                    return;
+                }
+                String icon, hex, bgHex, borderHex;
+                switch (severity) {
+                    case "ERROR"    -> { icon = "\u2717"; hex = HEX_ERROR;  bgHex = "#ffebee"; borderHex = "#ef9a9a"; }
+                    case "WARNING"  -> { icon = "\u26a0"; hex = HEX_WARN;   bgHex = "#fff3e0"; borderHex = "#ffcc80"; }
+                    case "ADVISORY" -> { icon = "\u2139"; hex = HEX_ADV;    bgHex = "#e3f2fd"; borderHex = "#90caf9"; }
+                    default         -> { icon = "\u2713"; hex = HEX_PASS;   bgHex = "#e8f5e9"; borderHex = "#a5d6a7"; }
+                }
+                Label badge = new Label(icon + " " + severity);
+                badge.setStyle("-fx-text-fill: " + hex + "; -fx-font-weight: bold; -fx-font-size: 10px;" +
+                              "-fx-background-color: " + bgHex + "; -fx-background-radius: 3;" +
+                              "-fx-border-color: " + borderHex + "; -fx-border-radius: 3; -fx-border-width: 1;" +
+                              "-fx-padding: 1 5 1 5;");
+                setGraphic(badge);
+                setText(null);
+            }
+        });
+
+        // --- Class column ---
+        TableColumn<TableRowData, String> classCol = new TableColumn<>("Class");
+        classCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().className()));
+        classCol.setPrefWidth(180);
+        classCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String className, boolean empty) {
+                super.updateItem(className, empty);
+                if (empty || className == null) {
+                    setText(null);
+                    setStyle("");
+                    return;
+                }
+                // Show just the simple class name, full name in tooltip
+                int lastDot = className.lastIndexOf('.');
+                setText(lastDot >= 0 ? className.substring(lastDot + 1) : className);
+                setTooltip(new Tooltip(className));
+                setStyle("-fx-text-fill: " + HEX_CLASS_HDR + "; -fx-font-weight: bold; -fx-font-size: 12px;");
+            }
+        });
+
+        // --- Guideline column ---
+        TableColumn<TableRowData, String> guideCol = new TableColumn<>("Guideline");
+        guideCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().guideline()));
+        guideCol.setPrefWidth(160);
+
+        // --- Message column ---
+        TableColumn<TableRowData, String> msgCol = new TableColumn<>("Message");
+        msgCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().message()));
+        // Color the message cell based on severity
+        msgCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String msg, boolean empty) {
+                super.updateItem(msg, empty);
+                if (empty || msg == null) {
+                    setText(null);
+                    setStyle("");
+                    return;
+                }
+                setText(msg);
+                // Get the row's severity to color the text
+                TableRowData row = getTableRow() != null ? getTableRow().getItem() : null;
+                if (row != null && "PASS".equals(row.severity())) {
+                    setStyle("-fx-text-fill: #66bb6a; -fx-font-size: 12px;");
+                } else {
+                    setStyle("-fx-text-fill: #555555; -fx-font-size: 12px;");
+                }
+            }
+        });
+
+        table.getColumns().addAll(sevCol, classCol, guideCol, msgCol);
+
+        return table;
+    }
+
+    // ==================================================================================
+    // Filter toggle factory
+    // ==================================================================================
+
     private ToggleButton createFilterToggle(String label, String styleClass) {
         ToggleButton toggle = new ToggleButton(label);
         toggle.setSelected(true);
@@ -313,17 +705,16 @@ public class MainWindow {
         return toggle;
     }
 
-    /**
-     * Handle the "Load Classes" button click.
-     */
+    // ==================================================================================
+    // Event handlers: Load and Analyze
+    // ==================================================================================
+
     private void handleLoad() {
         DirectoryChooser dirChooser = new DirectoryChooser();
         dirChooser.setTitle("Select Directory Containing .class Files");
 
         File selectedDir = dirChooser.showDialog(stage);
-        if (selectedDir == null) {
-            return;
-        }
+        if (selectedDir == null) return;
 
         statusBar.setText("Loading classes from: " + selectedDir.getAbsolutePath() + "...");
 
@@ -353,10 +744,6 @@ public class MainWindow {
         }
     }
 
-    /**
-     * Handle the "Run Analysis" button click.
-     * Stores results for re-filtering, then renders.
-     */
     private void handleAnalyze() {
         Set<String> selectedClasses = classListView.getItems().stream()
                 .filter(item -> item.selected.get())
@@ -383,7 +770,6 @@ public class MainWindow {
         try {
             lastResults = engine.analyze(selectedClasses, selectedGuidelines);
             refreshResults();
-
         } catch (Exception ex) {
             showError("Analysis Error", ex.getMessage());
             statusBar.setText("Error during analysis. See error dialog.");
@@ -391,30 +777,31 @@ public class MainWindow {
     }
 
     // ==================================================================================
-    // Results rendering — Phase 1 (severity display) & Phase 2 (filtering/sorting)
+    // Results rendering — filtering, sorting, and view population
     // ==================================================================================
 
     /**
-     * Re-render results using stored data and current filter/sort state.
+     * Re-render results using stored data, current filters, sort, and view mode.
      *
-     * This is the key architectural change: analysis runs once, but the display
-     * can be re-rendered any time a filter toggle or sort toggle changes.
+     * Flow: filter → sort → populate active view → update summary & status
      */
     private void refreshResults() {
         if (lastResults.isEmpty()) {
-            displayEmptyResults();
+            resultsTreeView.getRoot().getChildren().clear();
+            resultsTableView.getItems().clear();
+            statusBar.setText("No results to display.");
             return;
         }
 
         // Always update summary with unfiltered counts
         updateSummary(lastResults);
 
-        // Apply filters
+        // Filter
         List<AnalysisResult> filtered = lastResults.stream()
                 .filter(this::passesFilter)
                 .collect(Collectors.toList());
 
-        // Apply sort
+        // Sort
         List<AnalysisResult> sorted;
         if (sortBySeverity.isSelected()) {
             sorted = sortBySeverityThenClass(filtered);
@@ -422,10 +809,18 @@ public class MainWindow {
             sorted = sortByClassThenSeverity(filtered);
         }
 
-        // Render
-        displayResults(sorted);
+        // Populate the active view
+        boolean isTreeMode = viewTreeToggle.isSelected();
+        resultsTreeView.setVisible(isTreeMode);
+        resultsTableView.setVisible(!isTreeMode);
 
-        // Update status bar with filter awareness
+        if (isTreeMode) {
+            populateTreeView(sorted);
+        } else {
+            populateTableView(sorted);
+        }
+
+        // Status bar
         long totalViolations = lastResults.stream().filter(r -> !r.passed()).count();
         long totalPasses = lastResults.stream().filter(AnalysisResult::passed).count();
         long showing = filtered.size();
@@ -439,7 +834,94 @@ public class MainWindow {
         statusBar.setText(statusText);
     }
 
-    /** Check whether a result passes the current filter settings. */
+    /**
+     * Populate the TreeView from sorted/filtered results.
+     *
+     * Groups results by class name. Within each class:
+     *   - Violations appear as individual child nodes (severity order)
+     *   - Passes collapse into a single "N checks passed" node (expandable)
+     *
+     * Class nodes auto-expand if they have violations, stay collapsed if all passed.
+     * When "Sort by Severity" is active, classes with errors sort before classes
+     * with only warnings, etc.
+     */
+    private void populateTreeView(List<AnalysisResult> results) {
+        TreeItem<Object> root = resultsTreeView.getRoot();
+        root.getChildren().clear();
+
+        // Group by class, preserving sort order
+        Map<String, List<AnalysisResult>> byClass = results.stream()
+                .collect(Collectors.groupingBy(AnalysisResult::className,
+                        LinkedHashMap::new, Collectors.toList()));
+
+        for (var entry : byClass.entrySet()) {
+            String className = entry.getKey();
+            List<AnalysisResult> classResults = entry.getValue();
+
+            // Separate violations and passes
+            List<AnalysisResult.Violation> violations = classResults.stream()
+                    .filter(r -> r instanceof AnalysisResult.Violation)
+                    .map(r -> (AnalysisResult.Violation) r)
+                    .collect(Collectors.toList());
+
+            List<AnalysisResult.Pass> passes = classResults.stream()
+                    .filter(r -> r instanceof AnalysisResult.Pass)
+                    .map(r -> (AnalysisResult.Pass) r)
+                    .collect(Collectors.toList());
+
+            // Compute severity counts for the class header badges
+            int errors = (int) violations.stream().filter(v -> v.severity() == Severity.ERROR).count();
+            int warnings = (int) violations.stream().filter(v -> v.severity() == Severity.WARNING).count();
+            int advisories = (int) violations.stream().filter(v -> v.severity() == Severity.ADVISORY).count();
+
+            ClassNodeData classData = new ClassNodeData(className, errors, warnings, advisories, passes.size());
+            TreeItem<Object> classItem = new TreeItem<>(classData);
+            classItem.setExpanded(!violations.isEmpty());  // auto-expand if there are problems
+
+            // Add violation children
+            for (AnalysisResult.Violation v : violations) {
+                classItem.getChildren().add(new TreeItem<>(new ViolationNodeData(v)));
+            }
+
+            // Add collapsed pass summary (with expandable details)
+            if (!passes.isEmpty()) {
+                TreeItem<Object> passSummary = new TreeItem<>(new PassSummaryData(passes.size()));
+                for (AnalysisResult.Pass p : passes) {
+                    passSummary.getChildren().add(new TreeItem<>(new PassDetailData(p.guidelineName())));
+                }
+                classItem.getChildren().add(passSummary);
+            }
+
+            root.getChildren().add(classItem);
+        }
+    }
+
+    /**
+     * Populate the TableView from sorted/filtered results.
+     * Converts each AnalysisResult into a flat TableRowData for column display.
+     */
+    private void populateTableView(List<AnalysisResult> results) {
+        ObservableList<TableRowData> rows = FXCollections.observableArrayList(
+                results.stream()
+                        .map(TableRowData::from)
+                        .collect(Collectors.toList())
+        );
+        resultsTableView.setItems(rows);
+
+        // If sort-by-severity is active, apply initial sort on the severity column
+        if (sortBySeverity.isSelected() && !resultsTableView.getColumns().isEmpty()) {
+            TableColumn<TableRowData, ?> sevCol = resultsTableView.getColumns().get(0);
+            sevCol.setSortType(TableColumn.SortType.ASCENDING);
+            resultsTableView.getSortOrder().clear();
+            resultsTableView.getSortOrder().add(sevCol);
+            resultsTableView.sort();
+        }
+    }
+
+    // ==================================================================================
+    // Filtering and sorting
+    // ==================================================================================
+
     private boolean passesFilter(AnalysisResult result) {
         if (result instanceof AnalysisResult.Pass) {
             return filterPasses.isSelected();
@@ -453,7 +935,6 @@ public class MainWindow {
         return true;
     }
 
-    /** Sort by severity (errors first), then by class name within each severity group. */
     private List<AnalysisResult> sortBySeverityThenClass(List<AnalysisResult> results) {
         return results.stream()
                 .sorted(Comparator
@@ -463,7 +944,6 @@ public class MainWindow {
                 .collect(Collectors.toList());
     }
 
-    /** Sort by class name first (default), then severity within each class. */
     private List<AnalysisResult> sortByClassThenSeverity(List<AnalysisResult> results) {
         return results.stream()
                 .sorted(Comparator
@@ -473,21 +953,17 @@ public class MainWindow {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Numeric sort key for severity. Lower = more critical = sorts first.
-     * ERROR=0, WARNING=1, ADVISORY=2, PASS=3.
-     */
     private int severityOrdinal(AnalysisResult result) {
         if (result instanceof AnalysisResult.Violation v) {
             return v.severity().ordinal();
         }
-        return 3; // Passes sort last
+        return 3;
     }
 
-    /**
-     * Update the summary banner with colored badges from unfiltered results.
-     * Example: [● 3 Errors] [● 7 Warnings] [● 2 Advisories] [✓ 12 Passed]
-     */
+    // ==================================================================================
+    // Summary banner
+    // ==================================================================================
+
     private void updateSummary(List<AnalysisResult> allResults) {
         long errors = allResults.stream()
                 .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.ERROR)
@@ -504,30 +980,21 @@ public class MainWindow {
 
         summaryBar.getChildren().clear();
 
-        // Only show non-zero badges to avoid clutter
-        if (errors > 0) {
-            summaryBar.getChildren().add(
-                    createBadge("\u25cf " + errors + " Error" + plural(errors), "badge-error"));
-        }
-        if (warnings > 0) {
-            summaryBar.getChildren().add(
-                    createBadge("\u25cf " + warnings + " Warning" + plural(warnings), "badge-warning"));
-        }
+        if (errors > 0)
+            summaryBar.getChildren().add(createBadge("\u25cf " + errors + " Error" + plural(errors), "badge-error"));
+        if (warnings > 0)
+            summaryBar.getChildren().add(createBadge("\u25cf " + warnings + " Warning" + plural(warnings), "badge-warning"));
         if (advisories > 0) {
             String advText = advisories == 1 ? "Advisory" : "Advisories";
-            summaryBar.getChildren().add(
-                    createBadge("\u25cf " + advisories + " " + advText, "badge-advisory"));
+            summaryBar.getChildren().add(createBadge("\u25cf " + advisories + " " + advText, "badge-advisory"));
         }
-        if (passes > 0) {
-            summaryBar.getChildren().add(
-                    createBadge("\u2713 " + passes + " Passed", "badge-pass"));
-        }
+        if (passes > 0)
+            summaryBar.getChildren().add(createBadge("\u2713 " + passes + " Passed", "badge-pass"));
 
         summaryBar.setVisible(true);
         summaryBar.setManaged(true);
     }
 
-    /** Create a styled badge label for the summary bar. */
     private Label createBadge(String text, String styleClass) {
         Label badge = new Label(text);
         badge.getStyleClass().addAll("summary-badge", styleClass);
@@ -535,153 +1002,14 @@ public class MainWindow {
         return badge;
     }
 
-    /** Returns "s" for counts != 1, empty string otherwise. */
     private String plural(long count) {
         return count == 1 ? "" : "s";
     }
 
-    /**
-     * Render results into the TextFlow with severity-aware colors and icons.
-     *
-     * Layout differs based on sort mode:
-     *   - Class-first (default): groups under class name headers
-     *   - Severity-first: groups under severity level headers
-     */
-    private void displayResults(List<AnalysisResult> results) {
-        resultsDisplay.getChildren().clear();
+    // ==================================================================================
+    // Utilities
+    // ==================================================================================
 
-        if (results.isEmpty()) {
-            addResultText("All results filtered out. Adjust filters above.\n", Color.GRAY, false);
-            return;
-        }
-
-        if (sortBySeverity.isSelected()) {
-            renderBySeverity(results);
-        } else {
-            renderByClass(results);
-        }
-
-        resultsScrollPane.setVvalue(0);
-    }
-
-    /** Render grouped by class name (default view). */
-    private void renderByClass(List<AnalysisResult> results) {
-        Map<String, List<AnalysisResult>> byClass = results.stream()
-                .collect(Collectors.groupingBy(AnalysisResult::className,
-                        LinkedHashMap::new, Collectors.toList()));
-
-        for (var entry : byClass.entrySet()) {
-            addResultText("\n" + entry.getKey() + "\n", COLOR_CLASS_HDR, true);
-            for (AnalysisResult result : entry.getValue()) {
-                renderSingleResult(result);
-            }
-        }
-    }
-
-    /** Render grouped by severity level (errors first). */
-    private void renderBySeverity(List<AnalysisResult> results) {
-        Map<String, List<AnalysisResult>> grouped = new LinkedHashMap<>();
-
-        for (AnalysisResult result : results) {
-            String group = getSeverityGroupLabel(result);
-            grouped.computeIfAbsent(group, k -> new ArrayList<>()).add(result);
-        }
-
-        for (var entry : grouped.entrySet()) {
-            addResultText("\n\u2501\u2501 " + entry.getKey() + " \u2501\u2501\n",
-                    Color.web("#555555"), true);
-            for (AnalysisResult result : entry.getValue()) {
-                renderSingleResult(result);
-            }
-        }
-    }
-
-    /** Get a display label for severity-based grouping. */
-    private String getSeverityGroupLabel(AnalysisResult result) {
-        if (result instanceof AnalysisResult.Violation v) {
-            return switch (v.severity()) {
-                case ERROR    -> "Errors";
-                case WARNING  -> "Warnings";
-                case ADVISORY -> "Advisories";
-            };
-        }
-        return "Passed";
-    }
-
-    /**
-     * Render a single result line with severity-appropriate icon, color, and label.
-     *
-     * Examples:
-     *   ✗ [ERROR] [equals/hashCode Check] Class overrides equals() but not hashCode()
-     *   ⚠ [WARNING] [Serializable Check] Implements Serializable without serialVersionUID
-     *   ℹ [ADVISORY] [toString Check] Does not override toString()
-     *   ✓ [Cloneable Check] OK
-     */
-    private void renderSingleResult(AnalysisResult result) {
-        if (result instanceof AnalysisResult.Violation v) {
-            Color iconColor;
-            Color textColor;
-            String icon;
-            String severityTag;
-
-            switch (v.severity()) {
-                case ERROR -> {
-                    icon = "  \u2717 ";
-                    iconColor = COLOR_ERROR_ICON;
-                    textColor = COLOR_ERROR;
-                    severityTag = "ERROR";
-                }
-                case WARNING -> {
-                    icon = "  \u26a0 ";
-                    iconColor = COLOR_WARN_ICON;
-                    textColor = COLOR_WARN;
-                    severityTag = "WARNING";
-                }
-                case ADVISORY -> {
-                    icon = "  \u2139 ";
-                    iconColor = COLOR_ADVISORY_ICON;
-                    textColor = COLOR_ADVISORY;
-                    severityTag = "ADVISORY";
-                }
-                default -> {
-                    icon = "  \u2717 ";
-                    iconColor = COLOR_ERROR_ICON;
-                    textColor = COLOR_ERROR;
-                    severityTag = "ERROR";
-                }
-            }
-
-            addResultText(icon, iconColor, true);
-            addResultText("[" + severityTag + "] ", textColor, true);
-            addResultText("[" + v.guidelineName() + "] ", textColor, true);
-            addResultText(v.message() + "\n", textColor, false);
-
-        } else if (result instanceof AnalysisResult.Pass p) {
-            addResultText("  \u2713 ", COLOR_PASS_ICON, true);
-            addResultText("[" + p.guidelineName() + "] ", COLOR_PASS, true);
-            addResultText("OK\n", COLOR_PASS, false);
-        }
-    }
-
-    /** Show a placeholder when there are no results at all. */
-    private void displayEmptyResults() {
-        resultsDisplay.getChildren().clear();
-        addResultText("No results to display.\n", Color.GRAY, false);
-    }
-
-    /** Helper: add styled text to the results display. */
-    private void addResultText(String content, Color color, boolean bold) {
-        Text text = new Text(content);
-        text.setFill(color);
-        if (bold) {
-            text.setFont(Font.font("System", FontWeight.BOLD, 12));
-        } else {
-            text.setFont(Font.font("System", 12));
-        }
-        resultsDisplay.getChildren().add(text);
-    }
-
-    /** Show an error dialog. */
     private void showError(String title, String message) {
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle(title);
@@ -690,6 +1018,3 @@ public class MainWindow {
         alert.showAndWait();
     }
 }
-
-
-

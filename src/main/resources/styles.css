@@ -2,20 +2,20 @@
  * DesignLint CSS Stylesheet
  *
  * JavaFX supports CSS styling similar to web CSS, but with -fx- prefixed properties.
- * This is one of the biggest improvements over Swing, where styling required
- * verbose Java code and custom renderers.
  *
  * === SEVERITY COLOR SYSTEM ===
- * The color palette is used consistently across summary badges, filter toggles,
- * and the results display (though results colors are set in Java via TextFlow).
- *
  *   ERROR:    #c62828 / #d32f2f  (red family)
  *   WARNING:  #e65100 / #f57c00  (amber family)
  *   ADVISORY: #1565c0 / #1976d2  (blue family)
  *   PASS:     #2e7d32 / #388e3c  (green family)
+ *
+ * === PHASE HISTORY ===
+ *   Phase 1: Severity colors, summary banner
+ *   Phase 2: Filter toggles, sort controls
+ *   Phase 3: TreeView, TableView, view toggles, mini badges
  */
 
-/* ========== Base styling ========== */
+/* ========== Base ========== */
 .root {
     -fx-font-family: "System";
     -fx-font-size: 13px;
@@ -38,31 +38,26 @@
     -fx-padding: 5 12 5 12;
     -fx-cursor: hand;
 }
-
 .button:hover {
     -fx-background-color: #357abd;
 }
-
 .button:pressed {
     -fx-background-color: #2a5f99;
 }
-
 .button:disabled {
     -fx-background-color: #cccccc;
     -fx-text-fill: #888888;
 }
 
-/* ========== List Views ========== */
+/* ========== List Views (left panel) ========== */
 .list-view {
     -fx-border-color: #d0d0d0;
     -fx-border-radius: 3;
     -fx-background-radius: 3;
 }
-
 .list-cell {
     -fx-padding: 4 8 4 8;
 }
-
 .list-cell:selected {
     -fx-background-color: #e3f0ff;
     -fx-text-fill: #333333;
@@ -102,7 +97,7 @@
 
 
 /* ============================================================
- * SUMMARY BAR — Phase 1: at-a-glance severity counts
+ * SUMMARY BAR — at-a-glance severity counts (Phase 1)
  * ============================================================ */
 .summary-bar {
     -fx-background-color: #fafafa;
@@ -112,7 +107,6 @@
     -fx-background-radius: 4;
 }
 
-/* Base badge styling — pill-shaped labels with colored backgrounds */
 .summary-badge {
     -fx-font-size: 11px;
     -fx-font-weight: bold;
@@ -127,21 +121,18 @@
     -fx-border-color: #ef9a9a;
     -fx-border-width: 1;
 }
-
 .badge-warning {
     -fx-background-color: #fff3e0;
     -fx-text-fill: #e65100;
     -fx-border-color: #ffcc80;
     -fx-border-width: 1;
 }
-
 .badge-advisory {
     -fx-background-color: #e3f2fd;
     -fx-text-fill: #1565c0;
     -fx-border-color: #90caf9;
     -fx-border-width: 1;
 }
-
 .badge-pass {
     -fx-background-color: #e8f5e9;
     -fx-text-fill: #2e7d32;
@@ -151,13 +142,8 @@
 
 
 /* ============================================================
- * FILTER BAR — Phase 2: toggle buttons for show/hide and sort
- * ============================================================
- *
- * Filter toggles use a "pressed = active/showing" metaphor.
- * When selected, each button gets its severity color as background.
- * When deselected, it grays out to indicate that category is hidden.
- */
+ * FILTER BAR — toggles for show/hide, sort, and view (Phase 2-3)
+ * ============================================================ */
 .filter-bar {
     -fx-background-color: #f8f8f8;
     -fx-border-color: #e8e8e8;
@@ -166,7 +152,7 @@
     -fx-background-radius: 3;
 }
 
-/* Base filter toggle style — small, compact buttons */
+/* Base filter toggle */
 .filter-toggle {
     -fx-font-size: 11px;
     -fx-padding: 3 8 3 8;
@@ -178,8 +164,11 @@
     -fx-border-color: #cccccc;
     -fx-border-width: 1;
 }
+.filter-toggle:hover {
+    -fx-background-color: #d0d0d0;
+}
 
-/* --- Error filter toggle --- */
+/* Severity filter toggles — colored when active */
 .filter-error:selected {
     -fx-background-color: #c62828;
     -fx-text-fill: white;
@@ -188,11 +177,7 @@
 .filter-error:selected:hover {
     -fx-background-color: #b71c1c;
 }
-.filter-error:hover {
-    -fx-background-color: #d0d0d0;
-}
 
-/* --- Warning filter toggle --- */
 .filter-warning:selected {
     -fx-background-color: #e65100;
     -fx-text-fill: white;
@@ -201,11 +186,7 @@
 .filter-warning:selected:hover {
     -fx-background-color: #d84315;
 }
-.filter-warning:hover {
-    -fx-background-color: #d0d0d0;
-}
 
-/* --- Advisory filter toggle --- */
 .filter-advisory:selected {
     -fx-background-color: #1565c0;
     -fx-text-fill: white;
@@ -214,11 +195,7 @@
 .filter-advisory:selected:hover {
     -fx-background-color: #0d47a1;
 }
-.filter-advisory:hover {
-    -fx-background-color: #d0d0d0;
-}
 
-/* --- Pass filter toggle --- */
 .filter-pass:selected {
     -fx-background-color: #2e7d32;
     -fx-text-fill: white;
@@ -227,11 +204,8 @@
 .filter-pass:selected:hover {
     -fx-background-color: #1b5e20;
 }
-.filter-pass:hover {
-    -fx-background-color: #d0d0d0;
-}
 
-/* --- Sort toggle --- */
+/* Sort toggle */
 .sort-toggle:selected {
     -fx-background-color: #5c6bc0;
     -fx-text-fill: white;
@@ -240,6 +214,139 @@
 .sort-toggle:selected:hover {
     -fx-background-color: #3f51b5;
 }
-.sort-toggle:hover {
-    -fx-background-color: #d0d0d0;
+
+/* View toggles (Phase 3) */
+.view-toggle:selected {
+    -fx-background-color: #5c6bc0;
+    -fx-text-fill: white;
+    -fx-border-color: #3f51b5;
+}
+.view-toggle:selected:hover {
+    -fx-background-color: #3f51b5;
+}
+
+
+/* ============================================================
+ * TREE VIEW — Phase 3: expandable class nodes with results
+ * ============================================================ */
+
+/* Remove default tree view border/background clutter */
+.tree-view {
+    -fx-border-color: #d0d0d0;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+/* Tree cell base — clean spacing */
+.tree-cell {
+    -fx-padding: 3 6 3 6;
+    -fx-background-color: transparent;
+}
+.tree-cell:selected {
+    -fx-background-color: #e8eaf6;
+}
+.tree-cell:hover {
+    -fx-background-color: #f5f5f5;
+}
+.tree-cell:selected:hover {
+    -fx-background-color: #c5cae9;
+}
+
+/* Disclosure arrow styling */
+.tree-cell > .tree-disclosure-node > .arrow {
+    -fx-background-color: #888888;
+}
+.tree-cell:selected > .tree-disclosure-node > .arrow {
+    -fx-background-color: #333333;
+}
+
+/* ============================================================
+ * MINI BADGES — small count indicators on tree class nodes
+ * ============================================================ */
+.mini-badge {
+    -fx-font-size: 10px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-padding: 0 5 0 5;
+    -fx-min-width: 18;
+    -fx-alignment: center;
+}
+
+.mini-badge-error {
+    -fx-background-color: #ffebee;
+    -fx-text-fill: #c62828;
+    -fx-border-color: #ef9a9a;
+    -fx-border-width: 1;
+}
+.mini-badge-warning {
+    -fx-background-color: #fff3e0;
+    -fx-text-fill: #e65100;
+    -fx-border-color: #ffcc80;
+    -fx-border-width: 1;
+}
+.mini-badge-advisory {
+    -fx-background-color: #e3f2fd;
+    -fx-text-fill: #1565c0;
+    -fx-border-color: #90caf9;
+    -fx-border-width: 1;
+}
+.mini-badge-pass {
+    -fx-background-color: #e8f5e9;
+    -fx-text-fill: #2e7d32;
+    -fx-border-color: #a5d6a7;
+    -fx-border-width: 1;
+}
+
+
+/* ============================================================
+ * TABLE VIEW — Phase 3: flat sortable results grid
+ * ============================================================ */
+.table-view {
+    -fx-border-color: #d0d0d0;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+/* Column headers */
+.table-view .column-header {
+    -fx-background-color: #f5f5f5;
+    -fx-border-color: #e0e0e0;
+    -fx-border-width: 0 0 2 0;
+}
+.table-view .column-header .label {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #555555;
+    -fx-padding: 6 8 6 8;
+}
+
+/* Sort arrow in column headers */
+.table-view .column-header .arrow {
+    -fx-background-color: #888888;
+}
+
+/* Table rows */
+.table-row-cell {
+    -fx-border-color: transparent transparent #f0f0f0 transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 2 0 2 0;
+}
+.table-row-cell:hover {
+    -fx-background-color: #fafafa;
+}
+.table-row-cell:selected {
+    -fx-background-color: #e8eaf6;
+}
+
+/* Table cells */
+.table-cell {
+    -fx-padding: 4 8 4 8;
+    -fx-font-size: 12px;
+}
+
+/* Placeholder when table is empty */
+.table-view .placeholder .label {
+    -fx-text-fill: #999999;
+    -fx-font-size: 13px;
 }
