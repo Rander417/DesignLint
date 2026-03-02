@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.graph.StmtGraph;
 import sootup.core.jimple.basic.Value;
 import sootup.core.jimple.common.constant.NullConstant;
@@ -62,6 +63,11 @@ public class EqualsPatternCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.ERROR;
+    }
+
+    @Override
     public String description() {
         return "Checks that the equals() method follows the recommended pattern: " +
                "null check, instanceof type check, cast, then comparison logic.";
@@ -91,6 +97,7 @@ public class EqualsPatternCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Could not analyze equals() method body: " + e.getMessage()
             ));
         }
@@ -167,6 +174,7 @@ public class EqualsPatternCheck implements DesignGuideline {
             results.add(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "equals() method does not check for null argument. " +
                     "The first step should be: if (obj == null) return false; " +
                     "equals() must never throw NullPointerException."
@@ -177,6 +185,7 @@ public class EqualsPatternCheck implements DesignGuideline {
             results.add(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "equals() method does not use instanceof to check the argument type. " +
                     "After the null check, use: if (!(obj instanceof MyClass)) return false;"
             ));
@@ -186,6 +195,7 @@ public class EqualsPatternCheck implements DesignGuideline {
             results.add(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "equals() method has an instanceof check but no subsequent cast. " +
                     "After checking instanceof, cast the argument to the target type."
             ));
@@ -197,6 +207,7 @@ public class EqualsPatternCheck implements DesignGuideline {
                 results.add(new AnalysisResult.Violation(
                         className,
                         GUIDELINE_NAME,
+                        severity(),
                         "equals() method uses instanceof with type '" + instanceOfType +
                         "' but casts to type '" + castType + "'. " +
                         "The instanceof check and cast should use the same type."

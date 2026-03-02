@@ -33,6 +33,19 @@ public interface DesignGuideline {
     String description();
 
     /**
+     * The default severity level for violations produced by this guideline.
+     *
+     *   ERROR    — Will cause bugs (e.g., broken equals/hashCode contract)
+     *   WARNING  — Creates serious risk (e.g., deprecated APIs, exception swallowing)
+     *   ADVISORY — Best practice recommendation (e.g., missing toString())
+     *
+     * Most guidelines return a single severity for all their violations.
+     * Guidelines that produce violations of varying severity (e.g., CovariantEquals)
+     * can override per-violation by passing a different Severity to the Violation record.
+     */
+    Severity severity();
+
+    /**
      * Analyze a single class against this design guideline.
      *
      * @param sootClass the SootUp class representation to analyze

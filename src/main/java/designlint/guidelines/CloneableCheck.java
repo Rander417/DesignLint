@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.types.ClassType;
 import sootup.java.core.views.JavaView;
@@ -35,6 +36,11 @@ public class CloneableCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.WARNING;
+    }
+
+    @Override
     public String description() {
         return "Warns if a class implements java.lang.Cloneable. " +
                "Copy constructors should be used instead of clone().";
@@ -54,6 +60,7 @@ public class CloneableCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Class implements java.lang.Cloneable. This is discouraged — " +
                     "consider using a copy constructor instead. " +
                     "See Effective Java, Item 13: 'Override clone judiciously'."

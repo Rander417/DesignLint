@@ -43,7 +43,8 @@ public sealed interface AnalysisResult permits AnalysisResult.Pass, AnalysisResu
      *
      * @param className     the fully qualified name of the class
      * @param guidelineName the name of the guideline that was violated
+     * @param severity      how critical this violation is (ERROR, WARNING, ADVISORY)
      * @param message       a description of what's wrong and ideally how to fix it
      */
-    record Violation(String className, String guidelineName, String message) implements AnalysisResult {}
+    record Violation(String className, String guidelineName, Severity severity, String message) implements AnalysisResult {}
 }

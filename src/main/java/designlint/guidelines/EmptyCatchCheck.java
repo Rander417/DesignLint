@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.jimple.common.ref.JCaughtExceptionRef;
 import sootup.core.jimple.common.stmt.JAssignStmt;
 import sootup.core.jimple.common.stmt.JGotoStmt;
@@ -51,6 +52,11 @@ public class EmptyCatchCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.WARNING;
+    }
+
+    @Override
     public String description() {
         return "Warns if any method contains an empty catch block that silently " +
                "swallows exceptions without logging or handling them.";
@@ -90,6 +96,7 @@ public class EmptyCatchCheck implements DesignGuideline {
                             violations.add(new AnalysisResult.Violation(
                                     className,
                                     GUIDELINE_NAME,
+                                    severity(),
                                     "Method " + method.getName() + "() contains an empty catch block. " +
                                     "Silently swallowing exceptions hides bugs and makes debugging " +
                                     "extremely difficult. At minimum, log the exception."
@@ -161,6 +168,3 @@ public class EmptyCatchCheck implements DesignGuideline {
                 || stmt instanceof JReturnVoidStmt;
     }
 }
-
-
-

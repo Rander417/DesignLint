@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.model.SootMethod;
 import sootup.java.core.views.JavaView;
@@ -45,6 +46,11 @@ public class CovariantEqualsCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.ERROR;
+    }
+
+    @Override
     public String description() {
         return "Detects equals() methods that take a specific type instead of Object, " +
                "which overloads rather than overrides Object.equals().";
@@ -83,6 +89,7 @@ public class CovariantEqualsCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Class defines equals(" + covariantParamType + ") but does NOT override " +
                     "equals(Object). This overloads rather than overrides Object.equals(), " +
                     "so collections like HashSet and HashMap will NOT use your equals logic. " +
@@ -93,6 +100,7 @@ public class CovariantEqualsCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    Severity.ADVISORY,
                     "Class defines equals(" + covariantParamType + ") in addition to " +
                     "equals(Object). While the proper override exists, the covariant " +
                     "overload can cause confusion and maintenance issues. Consider " +

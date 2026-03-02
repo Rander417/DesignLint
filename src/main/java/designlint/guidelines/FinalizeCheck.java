@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.model.SootMethod;
 import sootup.java.core.views.JavaView;
@@ -41,6 +42,11 @@ public class FinalizeCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.WARNING;
+    }
+
+    @Override
     public String description() {
         return "Warns if a class overrides finalize(). This method is deprecated " +
                "and causes GC performance issues. Use try-with-resources or Cleaner instead.";
@@ -57,6 +63,7 @@ public class FinalizeCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Class overrides finalize(). This method is deprecated since Java 9 " +
                     "and causes unpredictable GC behavior, performance degradation, and " +
                     "potential security vulnerabilities. Use try-with-resources for " +

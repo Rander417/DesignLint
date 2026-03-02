@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.model.SootMethod;
 import sootup.core.types.ClassType;
@@ -45,6 +46,11 @@ public class CompareToEqualsCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.ERROR;
+    }
+
+    @Override
     public String description() {
         return "Warns if a class implements Comparable but does not override equals(). " +
                "The compareTo and equals contracts should be consistent.";
@@ -76,6 +82,7 @@ public class CompareToEqualsCheck implements DesignGuideline {
         return List.of(new AnalysisResult.Violation(
                 className,
                 GUIDELINE_NAME,
+                severity(),
                 "Class implements Comparable but does not override equals(). " +
                 "This likely means compareTo and equals are inconsistent: " +
                 "TreeSet/TreeMap (which use compareTo) and HashSet/HashMap (which " +

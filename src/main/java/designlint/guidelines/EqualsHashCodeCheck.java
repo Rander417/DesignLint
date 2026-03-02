@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.model.SootMethod;
 import sootup.java.core.views.JavaView;
@@ -36,6 +37,11 @@ public class EqualsHashCodeCheck implements DesignGuideline {
     @Override
     public String name() {
         return GUIDELINE_NAME;
+    }
+
+    @Override
+    public Severity severity() {
+        return Severity.ERROR;
     }
 
     @Override
@@ -82,6 +88,7 @@ public class EqualsHashCodeCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Class overrides equals() but NOT hashCode(). " +
                     "This will cause incorrect behavior with HashMap, HashSet, etc. " +
                     "Add a hashCode() override that is consistent with equals()."
@@ -90,6 +97,7 @@ public class EqualsHashCodeCheck implements DesignGuideline {
             return List.of(new AnalysisResult.Violation(
                     className,
                     GUIDELINE_NAME,
+                    severity(),
                     "Class overrides hashCode() but NOT equals(). " +
                     "These methods must be overridden together to maintain the " +
                     "equals/hashCode contract."

@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.core.model.SootField;
 import sootup.core.types.ClassType;
@@ -41,6 +42,11 @@ public class SerializableCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.WARNING;
+    }
+
+    @Override
     public String description() {
         return "Warns if a class implements Serializable without declaring a " +
                "serialVersionUID field. Missing this causes fragile deserialization.";
@@ -71,6 +77,7 @@ public class SerializableCheck implements DesignGuideline {
         return List.of(new AnalysisResult.Violation(
                 className,
                 GUIDELINE_NAME,
+                severity(),
                 "Class implements Serializable but does not declare a serialVersionUID. " +
                 "Without an explicit serialVersionUID, any change to the class structure " +
                 "will break deserialization of previously serialized objects. " +

@@ -3,15 +3,24 @@ package designlint;
 import designlint.core.AnalysisEngine;
 import designlint.core.ClassLoadingService;
 import designlint.core.DesignGuideline;
+import designlint.guidelines.CatchAllCheck;
 import designlint.guidelines.CloneableCheck;
+import designlint.guidelines.ConcreteReturnTypeCheck;
 import designlint.guidelines.CovariantEqualsCheck;
 import designlint.guidelines.CompareToEqualsCheck;
 import designlint.guidelines.EmptyCatchCheck;
+import designlint.guidelines.EmptyInterfaceCheck;
 import designlint.guidelines.EqualsHashCodeCheck;
 import designlint.guidelines.EqualsPatternCheck;
 import designlint.guidelines.FinalizeCheck;
+import designlint.guidelines.FunctionalInterfaceCheck;
+import designlint.guidelines.MutablePublicFieldCheck;
+import designlint.guidelines.MutableStaticCheck;
+import designlint.guidelines.OptionalMisuseCheck;
 import designlint.guidelines.SerializableCheck;
+import designlint.guidelines.ThrowsGenericCheck;
 import designlint.guidelines.ToStringCheck;
+import designlint.guidelines.UtilityClassConstructorCheck;
 import designlint.ui.MainWindow;
 
 import javafx.application.Application;
@@ -76,8 +85,19 @@ public class DesignLintApp extends Application {
                 new FinalizeCheck(),
                 new CompareToEqualsCheck(),
                 new ToStringCheck(),
-                // Code quality — body-level analysis
-                new EmptyCatchCheck()
+                // Exception handling
+                new EmptyCatchCheck(),
+                new CatchAllCheck(),
+                new ThrowsGenericCheck(),
+                // Interface & type design
+                new EmptyInterfaceCheck(),
+                new FunctionalInterfaceCheck(),
+                new ConcreteReturnTypeCheck(),
+                // Modern Java best practices
+                new MutableStaticCheck(),
+                new OptionalMisuseCheck(),
+                new MutablePublicFieldCheck(),
+                new UtilityClassConstructorCheck()
         );
     }
 

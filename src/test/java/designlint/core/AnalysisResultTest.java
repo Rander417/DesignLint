@@ -59,23 +59,38 @@ class AnalysisResultTest {
     @Test
     @DisplayName("Violation.passed() should return false")
     void violation_passed_returnsFalse() {
-        var violation = new AnalysisResult.Violation("Foo", "Check", "Something is wrong");
+        var violation = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "Something is wrong");
         assertFalse(violation.passed());
     }
 
     @Test
     @DisplayName("Violation should store the message correctly")
     void violation_message_returnsConstructorValue() {
-        var violation = new AnalysisResult.Violation("Foo", "Check", "Bad things happened");
+        var violation = new AnalysisResult.Violation("Foo", "Check", Severity.WARNING, "Bad things happened");
         assertEquals("Bad things happened", violation.message());
+    }
+
+    @Test
+    @DisplayName("Violation should store severity correctly")
+    void violation_severity_returnsConstructorValue() {
+        var violation = new AnalysisResult.Violation("Foo", "Check", Severity.ADVISORY, "Some suggestion");
+        assertEquals(Severity.ADVISORY, violation.severity());
     }
 
     @Test
     @DisplayName("Violation with same data should be equal")
     void violation_equalRecords_areEqual() {
-        var v1 = new AnalysisResult.Violation("Foo", "Check", "msg");
-        var v2 = new AnalysisResult.Violation("Foo", "Check", "msg");
+        var v1 = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "msg");
+        var v2 = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "msg");
         assertEquals(v1, v2);
+    }
+
+    @Test
+    @DisplayName("Violations with different severity should not be equal")
+    void violation_differentSeverity_areNotEqual() {
+        var v1 = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "msg");
+        var v2 = new AnalysisResult.Violation("Foo", "Check", Severity.WARNING, "msg");
+        assertNotEquals(v1, v2);
     }
 
     // === Sealed interface behavior ===
@@ -90,7 +105,7 @@ class AnalysisResultTest {
     @Test
     @DisplayName("Violation is an instance of AnalysisResult")
     void violation_isInstanceOfAnalysisResult() {
-        AnalysisResult result = new AnalysisResult.Violation("Foo", "Check", "msg");
+        AnalysisResult result = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "msg");
         assertInstanceOf(AnalysisResult.Violation.class, result);
     }
 
@@ -106,7 +121,25 @@ class AnalysisResultTest {
     @Test
     @DisplayName("toString() on Violation should contain message")
     void violation_toString_containsMessage() {
-        var v = new AnalysisResult.Violation("Foo", "Check", "broken!");
+        var v = new AnalysisResult.Violation("Foo", "Check", Severity.ERROR, "broken!");
         assertTrue(v.toString().contains("broken!"));
+    }
+
+    // === Severity enum ===
+
+    @Test
+    @DisplayName("Severity display names should be human-friendly")
+    void severity_displayNames() {
+        assertEquals("Error", Severity.ERROR.displayName());
+        assertEquals("Warning", Severity.WARNING.displayName());
+        assertEquals("Advisory", Severity.ADVISORY.displayName());
+    }
+
+    @Test
+    @DisplayName("Severity toString should match display name")
+    void severity_toString_matchesDisplayName() {
+        assertEquals("Error", Severity.ERROR.toString());
+        assertEquals("Warning", Severity.WARNING.toString());
+        assertEquals("Advisory", Severity.ADVISORY.toString());
     }
 }

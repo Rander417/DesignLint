@@ -2,6 +2,7 @@ package designlint.guidelines;
 
 import designlint.core.AnalysisResult;
 import designlint.core.DesignGuideline;
+import designlint.core.Severity;
 import sootup.core.model.SootClass;
 import sootup.java.core.views.JavaView;
 
@@ -42,6 +43,11 @@ public class ToStringCheck implements DesignGuideline {
     }
 
     @Override
+    public Severity severity() {
+        return Severity.ADVISORY;
+    }
+
+    @Override
     public String description() {
         return "Warns if a class with fields does not override toString(). " +
                "A meaningful toString() is essential for debugging and logging.";
@@ -76,6 +82,7 @@ public class ToStringCheck implements DesignGuideline {
         return List.of(new AnalysisResult.Violation(
                 className,
                 GUIDELINE_NAME,
+                severity(),
                 "Class has fields but does not override toString(). " +
                 "The default Object.toString() produces unhelpful output like '" +
                 className + "@1a2b3c'. Override toString() to include relevant " +
