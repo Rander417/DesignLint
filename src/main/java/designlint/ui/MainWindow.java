@@ -2,7 +2,9 @@ package designlint.ui;
 
 import designlint.core.AnalysisEngine;
 import designlint.core.AnalysisResult;
+import designlint.core.ConfigService;
 import designlint.core.DesignGuideline;
+import designlint.core.DesignLintConfig;
 import designlint.core.Severity;
 import sootup.core.model.SootClass;
 
@@ -21,6 +23,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 
 import java.io.File;
 import java.util.*;
@@ -33,46 +36,44 @@ import java.util.stream.Collectors;
  *
  * Phase 1: Severity-aware color coding and summary banner
  * Phase 2: Filter toggles and sort controls
- * Phase 3: TreeView + TableView with view toggle (this version)
+ * Phase 3: TreeView + TableView with view toggle
+ * Phase 4: Configuration persistence with settings dialog
  *
- * === PHASE 3 ARCHITECTURE ===
+ * === CONFIGURATION (Phase 4) ===
  *
- * The results area is now a StackPane that holds one of three display components:
+ * On startup, the ConfigService loads saved configuration and applies it:
+ *   - Guideline enable/disable states restore from config
+ *   - Filter toggles, view mode, and sort preference restore from config
+ *   - Window size and position restore from config
+ *   - File chooser opens to last-used classpath directory
  *
- *   - TreeView: Classes as expandable nodes, violations as children, passes collapsed
- *     into a summary. Best for "what's wrong with THIS class?" workflows. Each class
- *     node shows inline severity counts and a colored left border for worst severity.
+ * On close, session state auto-saves to the global config:
+ *   - Current window size and position
+ *   - Last-used classpath directory
+ *   - Current filter, view, and sort state
+ *   - Current guideline selections
  *
- *   - TableView: Flat sortable table with columns for severity, class, guideline,
- *     and message. Best for "show me ALL warnings across ALL classes" workflows.
- *     Click column headers to sort.
+ * The Settings dialog (gear icon in toolbar) provides intentional control over
+ * defaults. "Save as Defaults" writes to global config, "Save for This Project"
+ * writes a sparse project config next to the analyzed classes.
  *
- * The view is controlled by toggle buttons in the filter bar. Switching views
- * re-renders from stored results without re-running analysis.
+ * === JAVAFX CONCEPTS ===
  *
- * === JAVAFX CONCEPTS FOR PHASE 3 ===
+ * Stage.setOnCloseRequest: Fires when the user closes the window (X button, Alt+F4).
+ * We hook this to auto-save session state. The event can be consumed to prevent
+ * closing (e.g., "unsaved changes" prompts), but we just save and let it close.
  *
- * TreeView<T>: A hierarchical list control. Each node is a TreeItem<T> which can
- * have children. TreeCells render each visible node. Unlike Swing JTree which uses
- * a TreeModel, JavaFX uses a simple parent-child TreeItem structure.
+ * StackPane: Stacks children on top of each other; we toggle visibility to swap
+ * between TreeView and TableView in the results area.
  *
- * TreeCell: The visual representation of one TreeItem. A cell factory creates these.
- * IMPORTANT: cells are RECYCLED — the same cell object renders different items as
- * you scroll. The updateItem() method must handle this by clearing state when the
- * item is null or empty, and fully rebuilding the visual for each new item.
- *
- * TableView<T>: A sortable, column-based grid. Each column has a cellValueFactory
- * (extracts data from the row object) and optionally a cellFactory (custom rendering).
- * Columns are sortable by clicking headers — JavaFX handles the sort UI automatically.
- *
- * StackPane: A layout that stacks children on top of each other. Only the visible
- * child is shown. We use this to swap between TreeView and TableView in the same
- * space without rearranging the layout.
+ * TreeView cell recycling: Cells are reused as you scroll. The updateItem() method
+ * MUST clear all state for empty/null items to avoid visual artifacts.
  */
 public class MainWindow {
 
     private final Stage stage;
     private final AnalysisEngine engine;
+    private final ConfigService configService;
 
     // --- UI Components ---
     private ListView<ClassItem> classListView;
@@ -96,7 +97,7 @@ public class MainWindow {
     private TreeView<Object> resultsTreeView;
     private TableView<TableRowData> resultsTableView;
 
-    /** Stored results from the last analysis run, used for re-filtering/sorting. */
+    /** Stored results from the last analysis run. */
     private List<AnalysisResult> lastResults = List.of();
 
     // --- Severity color palette ---
@@ -111,10 +112,9 @@ public class MainWindow {
     private static final String HEX_CLASS_HDR  = "#1a237e";
 
     // ==================================================================================
-    // Inner types: data wrappers for the left-panel lists and result views
+    // Inner types
     // ==================================================================================
 
-    /** Wrapper for classes shown in the loaded-classes ListView. */
     private static class ClassItem {
         final String className;
         final boolean isUserSelected;
@@ -131,7 +131,6 @@ public class MainWindow {
         }
     }
 
-    /** Wrapper for guidelines in the guideline-selection ListView. */
     private static class GuidelineItem {
         final DesignGuideline guideline;
         final SimpleBooleanProperty selected = new SimpleBooleanProperty(true);
@@ -147,21 +146,8 @@ public class MainWindow {
     }
 
     // --- TreeView node types ---
-    // These are the data objects stored in TreeItem<Object>. The tree cell factory
-    // uses instanceof to decide how to render each one.
-
-    /**
-     * Data for a class-level tree node. Holds the class name plus pre-computed
-     * severity counts so the cell factory doesn't have to recount every render.
-     */
-    private record ClassNodeData(
-            String className,
-            int errorCount,
-            int warningCount,
-            int advisoryCount,
-            int passCount
-    ) {
-        /** The worst (most critical) severity present in this class's results. */
+    private record ClassNodeData(String className, int errorCount, int warningCount,
+                                 int advisoryCount, int passCount) {
         String worstSeverityColor() {
             if (errorCount > 0) return HEX_ERROR_ICON;
             if (warningCount > 0) return HEX_WARN_ICON;
@@ -169,37 +155,17 @@ public class MainWindow {
             return HEX_PASS_ICON;
         }
     }
-
-    /** Data for a violation child node in the tree. */
     private record ViolationNodeData(AnalysisResult.Violation violation) {}
-
-    /** Data for the collapsible "N checks passed" summary node. */
     private record PassSummaryData(int count) {}
-
-    /** Data for an individual pass detail (child of PassSummaryData). */
     private record PassDetailData(String guidelineName) {}
 
     // --- TableView row type ---
-    /**
-     * Flat row for the TableView. We pre-extract fields from AnalysisResult so that
-     * TableColumn cell value factories are simple property lookups.
-     */
-    private record TableRowData(
-            String severity,       // "ERROR", "WARNING", "ADVISORY", "PASS"
-            int severityOrder,     // 0, 1, 2, 3 — for sorting
-            String className,
-            String guideline,
-            String message
-    ) {
+    private record TableRowData(String severity, int severityOrder, String className,
+                                String guideline, String message) {
         static TableRowData from(AnalysisResult result) {
             if (result instanceof AnalysisResult.Violation v) {
-                return new TableRowData(
-                        v.severity().name(),
-                        v.severity().ordinal(),
-                        v.className(),
-                        v.guidelineName(),
-                        v.message()
-                );
+                return new TableRowData(v.severity().name(), v.severity().ordinal(),
+                        v.className(), v.guidelineName(), v.message());
             } else if (result instanceof AnalysisResult.Pass p) {
                 return new TableRowData("PASS", 3, p.className(), p.guidelineName(), "OK");
             }
@@ -208,17 +174,22 @@ public class MainWindow {
     }
 
     // ==================================================================================
-    // Construction and UI building
+    // Construction
     // ==================================================================================
 
-    public MainWindow(Stage stage, AnalysisEngine engine) {
+    public MainWindow(Stage stage, AnalysisEngine engine, ConfigService configService) {
         this.stage = stage;
         this.engine = engine;
+        this.configService = configService;
         buildUI();
+        applyConfig();
+
+        // Auto-save session state when the window closes
+        stage.setOnCloseRequest(this::handleWindowClose);
     }
 
     private void buildUI() {
-        // === TOP: Toolbar with buttons ===
+        // === TOP: Toolbar ===
         loadButton = new Button("Load Classes...");
         loadButton.setOnAction(e -> handleLoad());
 
@@ -232,16 +203,22 @@ public class MainWindow {
         Button deselectAllClasses = new Button("Deselect All");
         deselectAllClasses.setOnAction(e -> classListView.getItems().forEach(i -> i.selected.set(false)));
 
+        // Settings button (gear icon via Unicode)
+        Button settingsButton = new Button("\u2699 Settings");
+        settingsButton.setOnAction(e -> handleSettings());
+
         ToolBar toolBar = new ToolBar(
                 loadButton,
                 new Separator(),
                 selectAllClasses,
                 deselectAllClasses,
                 new Separator(),
-                analyzeButton
+                analyzeButton,
+                new Separator(),
+                settingsButton
         );
 
-        // === LEFT PANEL: Class list + Guideline checkboxes ===
+        // === LEFT PANEL ===
 
         Label classLabel = new Label("Loaded Classes:");
         classLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
@@ -263,7 +240,6 @@ public class MainWindow {
         );
         guidelineListView.setItems(guidelineItems);
 
-        // Tooltip for each guideline (shown on hover)
         guidelineListView.setCellFactory(lv -> {
             CheckBoxListCell<GuidelineItem> cell = new CheckBoxListCell<>(item -> item.selected);
             cell.itemProperty().addListener((obs, oldItem, newItem) -> {
@@ -282,11 +258,10 @@ public class MainWindow {
         leftPanel.setPadding(new Insets(8));
         leftPanel.setPrefWidth(350);
 
-        // === RIGHT PANEL: Results ===
+        // === RIGHT PANEL ===
         Label resultsLabel = new Label("Analysis Results:");
         resultsLabel.setFont(Font.font("System", FontWeight.BOLD, 13));
 
-        // --- Summary banner ---
         summaryBar = new HBox(6);
         summaryBar.setAlignment(Pos.CENTER_LEFT);
         summaryBar.setPadding(new Insets(6, 10, 6, 10));
@@ -294,7 +269,7 @@ public class MainWindow {
         summaryBar.setVisible(false);
         summaryBar.setManaged(false);
 
-        // --- Filter, sort, and view controls ---
+        // Filter, sort, and view controls
         filterError = createFilterToggle("Errors", "filter-error");
         filterWarning = createFilterToggle("Warnings", "filter-warning");
         filterAdvisory = createFilterToggle("Advisories", "filter-advisory");
@@ -307,14 +282,12 @@ public class MainWindow {
                 "Tree: most-problematic classes first\nTable: severity column sort"));
         sortBySeverity.setOnAction(e -> refreshResults());
 
-        // View toggle — mutually exclusive via a ToggleGroup
         ToggleGroup viewGroup = new ToggleGroup();
         viewTreeToggle = new ToggleButton("Tree View");
         viewTreeToggle.getStyleClass().addAll("filter-toggle", "view-toggle");
         viewTreeToggle.setToggleGroup(viewGroup);
         viewTreeToggle.setSelected(true);
         viewTreeToggle.setOnAction(e -> {
-            // Prevent deselecting the active view (ToggleGroup allows it by default)
             if (!viewTreeToggle.isSelected()) viewTreeToggle.setSelected(true);
             else refreshResults();
         });
@@ -343,12 +316,11 @@ public class MainWindow {
         filterBar.setPadding(new Insets(4, 8, 4, 8));
         filterBar.getStyleClass().add("filter-bar");
 
-        // --- Results container: StackPane holds the active view ---
         resultsTreeView = createTreeView();
         resultsTableView = createTableView();
 
         resultsContainer = new StackPane(resultsTreeView, resultsTableView);
-        resultsTableView.setVisible(false);  // tree is default
+        resultsTableView.setVisible(false);
         VBox.setVgrow(resultsContainer, Priority.ALWAYS);
 
         VBox rightPanel = new VBox(8,
@@ -356,11 +328,11 @@ public class MainWindow {
         );
         rightPanel.setPadding(new Insets(8));
 
-        // === SPLIT PANE: Left | Right ===
+        // === SPLIT PANE ===
         SplitPane splitPane = new SplitPane(leftPanel, rightPanel);
         splitPane.setDividerPositions(0.35);
 
-        // === BOTTOM: Status bar ===
+        // === STATUS BAR ===
         statusBar = new Label("Ready. Load classes to begin analysis.");
         statusBar.setPadding(new Insets(4, 8, 4, 8));
         statusBar.setStyle("-fx-background-color: #f0f0f0; -fx-border-color: #cccccc; " +
@@ -372,6 +344,7 @@ public class MainWindow {
         root.setCenter(splitPane);
         root.setBottom(statusBar);
 
+        // Window size comes from config (applied in applyConfig), but set defaults here
         Scene scene = new Scene(root, 1050, 720);
 
         scene.getStylesheets().add(getClass().getResource("/styles.css") != null
@@ -384,83 +357,147 @@ public class MainWindow {
     }
 
     // ==================================================================================
-    // TreeView setup and cell factory
+    // Configuration: apply on startup, save on close
     // ==================================================================================
 
     /**
-     * Create and configure the TreeView for results display.
-     *
-     * The tree structure is:
-     *   Root (hidden)
-     *   ├── ClassNodeData("com.example.Foo", counts...)
-     *   │   ├── ViolationNodeData(violation1)
-     *   │   ├── ViolationNodeData(violation2)
-     *   │   └── PassSummaryData(3)        ← collapsible
-     *   │       ├── PassDetailData("Cloneable Check")
-     *   │       ├── PassDetailData("Empty Catch Check")
-     *   │       └── PassDetailData("Mutable Static Check")
-     *   └── ClassNodeData("com.example.Bar", counts...)
-     *       └── ...
-     *
-     * The cell factory uses instanceof on the TreeItem's value to decide rendering.
+     * Apply saved configuration to the UI.
+     * Called once after buildUI(), restoring the previous session's state.
      */
+    private void applyConfig() {
+        DesignLintConfig config = configService.getConfig();
+
+        // Guideline enable/disable defaults
+        for (GuidelineItem item : guidelineListView.getItems()) {
+            item.selected.set(config.isGuidelineEnabled(item.guideline.name()));
+        }
+
+        // Filter toggles
+        filterError.setSelected(config.getFilters().isShowErrors());
+        filterWarning.setSelected(config.getFilters().isShowWarnings());
+        filterAdvisory.setSelected(config.getFilters().isShowAdvisories());
+        filterPasses.setSelected(config.getFilters().isShowPasses());
+
+        // View mode
+        if ("table".equals(config.getViewMode())) {
+            viewTableToggle.setSelected(true);
+            resultsTreeView.setVisible(false);
+            resultsTableView.setVisible(true);
+        } else {
+            viewTreeToggle.setSelected(true);
+            resultsTreeView.setVisible(true);
+            resultsTableView.setVisible(false);
+        }
+
+        // Sort preference
+        sortBySeverity.setSelected(config.isSortBySeverity());
+
+        // Window size and position
+        DesignLintConfig.WindowConfig wc = config.getWindow();
+        if (wc.getWidth() > 0) stage.setWidth(wc.getWidth());
+        if (wc.getHeight() > 0) stage.setHeight(wc.getHeight());
+        if (wc.getX() >= 0) stage.setX(wc.getX());
+        if (wc.getY() >= 0) stage.setY(wc.getY());
+    }
+
+    /**
+     * Capture current UI state into the config and save.
+     * Called automatically when the window closes.
+     */
+    private void handleWindowClose(WindowEvent event) {
+        DesignLintConfig config = configService.getConfig();
+
+        // Guideline states
+        Map<String, Boolean> guidelineState = new LinkedHashMap<>();
+        for (GuidelineItem item : guidelineListView.getItems()) {
+            guidelineState.put(item.guideline.name(), item.selected.get());
+        }
+        config.setGuidelines(guidelineState);
+
+        // Filters
+        config.getFilters().setShowErrors(filterError.isSelected());
+        config.getFilters().setShowWarnings(filterWarning.isSelected());
+        config.getFilters().setShowAdvisories(filterAdvisory.isSelected());
+        config.getFilters().setShowPasses(filterPasses.isSelected());
+
+        // View and sort
+        config.setViewMode(viewTableToggle.isSelected() ? "table" : "tree");
+        config.setSortBySeverity(sortBySeverity.isSelected());
+
+        // Window geometry
+        DesignLintConfig.WindowConfig wc = config.getWindow();
+        wc.setWidth(stage.getWidth());
+        wc.setHeight(stage.getHeight());
+        wc.setX(stage.getX());
+        wc.setY(stage.getY());
+
+        configService.saveGlobal();
+    }
+
+    /**
+     * Open the Settings dialog. If the user saves, re-apply the config to the UI.
+     */
+    private void handleSettings() {
+        SettingsDialog dialog = new SettingsDialog(configService, engine.getAvailableGuidelines());
+        Optional<ButtonType> result = dialog.showAndWait();
+
+        if (result.isPresent() && SettingsDialog.wasSaved(result.get())) {
+            // Re-apply config to UI (guideline checkboxes, filter toggles, view mode)
+            applyConfig();
+
+            // If there are existing results, re-render with new filter/sort settings
+            if (!lastResults.isEmpty()) {
+                refreshResults();
+            }
+
+            statusBar.setText("Settings saved.");
+        }
+    }
+
+    // ==================================================================================
+    // TreeView setup and cell factory
+    // ==================================================================================
+
     private TreeView<Object> createTreeView() {
         TreeView<Object> tree = new TreeView<>();
         tree.setShowRoot(false);
-        tree.setRoot(new TreeItem<>());  // invisible root
+        tree.setRoot(new TreeItem<>());
 
         tree.setCellFactory(tv -> new TreeCell<>() {
             @Override
             protected void updateItem(Object item, boolean empty) {
                 super.updateItem(item, empty);
-
-                // CRITICAL: cells are recycled. Must clear everything for empty/null cells.
                 if (empty || item == null) {
                     setText(null);
                     setGraphic(null);
                     setStyle("");
                     return;
                 }
-
-                setText(null); // we use graphic exclusively for full control
+                setText(null);
 
                 if (item instanceof ClassNodeData cn) {
                     setGraphic(buildClassNodeGraphic(cn));
-                    // Left border colored by worst severity
                     setStyle("-fx-border-color: transparent transparent transparent " +
                              cn.worstSeverityColor() + ";" +
                              "-fx-border-width: 0 0 0 3; -fx-padding: 4 8 4 6;");
-
                 } else if (item instanceof ViolationNodeData vn) {
                     setGraphic(buildViolationGraphic(vn.violation()));
                     setStyle("-fx-padding: 2 8 2 4;");
-
                 } else if (item instanceof PassSummaryData ps) {
                     setGraphic(buildPassSummaryGraphic(ps));
                     setStyle("-fx-padding: 2 8 2 4;");
-
                 } else if (item instanceof PassDetailData pd) {
                     setGraphic(buildPassDetailGraphic(pd));
                     setStyle("-fx-padding: 1 8 1 4;");
-
                 } else {
                     setGraphic(null);
                     setStyle("");
                 }
             }
         });
-
         return tree;
     }
 
-    /**
-     * Build the graphic for a class-level tree node.
-     *
-     * Layout: [package.ClassName] [spacer] [mini error badge] [mini warn badge] ...
-     *
-     * The package name is grayed out, class name is bold indigo. Mini badges on the
-     * right show counts at a glance without expanding.
-     */
     private HBox buildClassNodeGraphic(ClassNodeData cn) {
         String fullName = cn.className();
         int lastDot = fullName.lastIndexOf('.');
@@ -473,27 +510,22 @@ public class MainWindow {
         Label nameLabel = new Label(simpleName);
         nameLabel.setStyle("-fx-text-fill: " + HEX_CLASS_HDR + "; -fx-font-size: 12px; -fx-font-weight: bold;");
 
-        // Spacer pushes badges to the right
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         HBox row = new HBox(0, pkgLabel, nameLabel, spacer);
         row.setAlignment(Pos.CENTER_LEFT);
 
-        // Add mini severity count badges (only for non-zero counts)
         if (cn.errorCount() > 0)    row.getChildren().add(miniBadge(String.valueOf(cn.errorCount()), "mini-badge-error"));
         if (cn.warningCount() > 0)  row.getChildren().add(miniBadge(String.valueOf(cn.warningCount()), "mini-badge-warning"));
         if (cn.advisoryCount() > 0) row.getChildren().add(miniBadge(String.valueOf(cn.advisoryCount()), "mini-badge-advisory"));
         if (cn.passCount() > 0)     row.getChildren().add(miniBadge(String.valueOf(cn.passCount()), "mini-badge-pass"));
 
-        // Give the row enough width for badges to spread out
         row.setMinWidth(400);
         row.setPrefWidth(500);
-
         return row;
     }
 
-    /** Create a small colored count badge for class node headers. */
     private Label miniBadge(String text, String styleClass) {
         Label badge = new Label(text);
         badge.getStyleClass().addAll("mini-badge", styleClass);
@@ -502,10 +534,6 @@ public class MainWindow {
         return badge;
     }
 
-    /**
-     * Build the graphic for a violation child node.
-     * Layout: [icon] [SEVERITY tag] [guideline name] [message]
-     */
     private HBox buildViolationGraphic(AnalysisResult.Violation v) {
         String icon, sevTag, hexIcon, hexText, bgHex, borderHex;
         switch (v.severity()) {
@@ -553,7 +581,6 @@ public class MainWindow {
         return row;
     }
 
-    /** Build the graphic for the "N checks passed" summary node. */
     private HBox buildPassSummaryGraphic(PassSummaryData ps) {
         Label icon = new Label("\u2713");
         icon.setStyle("-fx-text-fill: " + HEX_PASS_ICON + "; -fx-font-weight: bold; -fx-font-size: 12px;");
@@ -568,7 +595,6 @@ public class MainWindow {
         return row;
     }
 
-    /** Build the graphic for an individual pass detail row. */
     private HBox buildPassDetailGraphic(PassDetailData pd) {
         Label icon = new Label("\u2713");
         icon.setStyle("-fx-text-fill: " + HEX_PASS_ICON + "; -fx-font-size: 11px;");
@@ -586,23 +612,13 @@ public class MainWindow {
     // TableView setup
     // ==================================================================================
 
-    /**
-     * Create and configure the TableView for flat, sortable results.
-     *
-     * Columns: Severity | Class | Guideline | Message
-     *
-     * The severity column uses a custom cell factory for colored badge rendering.
-     * All columns are sortable by clicking headers — JavaFX handles the sort UI.
-     * The comparator for the severity column uses the numeric severityOrder so that
-     * ERROR sorts before WARNING before ADVISORY before PASS.
-     */
     @SuppressWarnings("unchecked")
     private TableView<TableRowData> createTableView() {
         TableView<TableRowData> table = new TableView<>();
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("No results to display."));
 
-        // --- Severity column ---
+        // Severity column
         TableColumn<TableRowData, String> sevCol = new TableColumn<>("Severity");
         sevCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().severity()));
         sevCol.setComparator(Comparator.comparingInt(s -> {
@@ -616,11 +632,7 @@ public class MainWindow {
             @Override
             protected void updateItem(String severity, boolean empty) {
                 super.updateItem(severity, empty);
-                if (empty || severity == null) {
-                    setGraphic(null);
-                    setText(null);
-                    return;
-                }
+                if (empty || severity == null) { setGraphic(null); setText(null); return; }
                 String icon, hex, bgHex, borderHex;
                 switch (severity) {
                     case "ERROR"    -> { icon = "\u2717"; hex = HEX_ERROR;  bgHex = "#ffebee"; borderHex = "#ef9a9a"; }
@@ -638,7 +650,7 @@ public class MainWindow {
             }
         });
 
-        // --- Class column ---
+        // Class column
         TableColumn<TableRowData, String> classCol = new TableColumn<>("Class");
         classCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().className()));
         classCol.setPrefWidth(180);
@@ -646,12 +658,7 @@ public class MainWindow {
             @Override
             protected void updateItem(String className, boolean empty) {
                 super.updateItem(className, empty);
-                if (empty || className == null) {
-                    setText(null);
-                    setStyle("");
-                    return;
-                }
-                // Show just the simple class name, full name in tooltip
+                if (empty || className == null) { setText(null); setStyle(""); return; }
                 int lastDot = className.lastIndexOf('.');
                 setText(lastDot >= 0 ? className.substring(lastDot + 1) : className);
                 setTooltip(new Tooltip(className));
@@ -659,26 +666,20 @@ public class MainWindow {
             }
         });
 
-        // --- Guideline column ---
+        // Guideline column
         TableColumn<TableRowData, String> guideCol = new TableColumn<>("Guideline");
         guideCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().guideline()));
         guideCol.setPrefWidth(160);
 
-        // --- Message column ---
+        // Message column
         TableColumn<TableRowData, String> msgCol = new TableColumn<>("Message");
         msgCol.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().message()));
-        // Color the message cell based on severity
         msgCol.setCellFactory(col -> new TableCell<>() {
             @Override
             protected void updateItem(String msg, boolean empty) {
                 super.updateItem(msg, empty);
-                if (empty || msg == null) {
-                    setText(null);
-                    setStyle("");
-                    return;
-                }
+                if (empty || msg == null) { setText(null); setStyle(""); return; }
                 setText(msg);
-                // Get the row's severity to color the text
                 TableRowData row = getTableRow() != null ? getTableRow().getItem() : null;
                 if (row != null && "PASS".equals(row.severity())) {
                     setStyle("-fx-text-fill: #66bb6a; -fx-font-size: 12px;");
@@ -689,7 +690,6 @@ public class MainWindow {
         });
 
         table.getColumns().addAll(sevCol, classCol, guideCol, msgCol);
-
         return table;
     }
 
@@ -713,6 +713,15 @@ public class MainWindow {
         DirectoryChooser dirChooser = new DirectoryChooser();
         dirChooser.setTitle("Select Directory Containing .class Files");
 
+        // Start in the last-used directory if available
+        String lastPath = configService.getConfig().getLastClasspath();
+        if (lastPath != null) {
+            File lastDir = new File(lastPath);
+            if (lastDir.isDirectory()) {
+                dirChooser.setInitialDirectory(lastDir);
+            }
+        }
+
         File selectedDir = dirChooser.showDialog(stage);
         if (selectedDir == null) return;
 
@@ -721,8 +730,12 @@ public class MainWindow {
         try {
             engine.getClassLoadingService().load(selectedDir.toPath(), Set.of());
 
-            ObservableList<ClassItem> classItems = FXCollections.observableArrayList();
+            // Save last classpath and reload config (picks up project config if present)
+            configService.getConfig().setLastClasspath(selectedDir.getAbsolutePath());
+            configService.load(selectedDir.toPath());
+            applyConfig();  // project config may change guideline/filter defaults
 
+            ObservableList<ClassItem> classItems = FXCollections.observableArrayList();
             for (SootClass sc : engine.getClassLoadingService().getUserSelectedClasses()) {
                 var item = new ClassItem(sc.getType().getFullyQualifiedName(), true);
                 item.selected.set(true);
@@ -736,7 +749,11 @@ public class MainWindow {
             analyzeButton.setDisable(false);
 
             int count = engine.getClassLoadingService().classCount();
-            statusBar.setText("Loaded " + count + " class(es). Select classes and guidelines, then run analysis.");
+            String projectNote = configService.hasProjectDir() &&
+                    java.nio.file.Files.exists(selectedDir.toPath().resolve("designlint.json"))
+                    ? " (project config loaded)" : "";
+            statusBar.setText("Loaded " + count + " class(es)." + projectNote +
+                    " Select classes and guidelines, then run analysis.");
 
         } catch (Exception ex) {
             showError("Failed to load classes", ex.getMessage());
@@ -777,14 +794,9 @@ public class MainWindow {
     }
 
     // ==================================================================================
-    // Results rendering — filtering, sorting, and view population
+    // Results rendering
     // ==================================================================================
 
-    /**
-     * Re-render results using stored data, current filters, sort, and view mode.
-     *
-     * Flow: filter → sort → populate active view → update summary & status
-     */
     private void refreshResults() {
         if (lastResults.isEmpty()) {
             resultsTreeView.getRoot().getChildren().clear();
@@ -793,15 +805,12 @@ public class MainWindow {
             return;
         }
 
-        // Always update summary with unfiltered counts
         updateSummary(lastResults);
 
-        // Filter
         List<AnalysisResult> filtered = lastResults.stream()
                 .filter(this::passesFilter)
                 .collect(Collectors.toList());
 
-        // Sort
         List<AnalysisResult> sorted;
         if (sortBySeverity.isSelected()) {
             sorted = sortBySeverityThenClass(filtered);
@@ -809,7 +818,6 @@ public class MainWindow {
             sorted = sortByClassThenSeverity(filtered);
         }
 
-        // Populate the active view
         boolean isTreeMode = viewTreeToggle.isSelected();
         resultsTreeView.setVisible(isTreeMode);
         resultsTableView.setVisible(!isTreeMode);
@@ -820,7 +828,6 @@ public class MainWindow {
             populateTableView(sorted);
         }
 
-        // Status bar
         long totalViolations = lastResults.stream().filter(r -> !r.passed()).count();
         long totalPasses = lastResults.stream().filter(AnalysisResult::passed).count();
         long showing = filtered.size();
@@ -834,22 +841,10 @@ public class MainWindow {
         statusBar.setText(statusText);
     }
 
-    /**
-     * Populate the TreeView from sorted/filtered results.
-     *
-     * Groups results by class name. Within each class:
-     *   - Violations appear as individual child nodes (severity order)
-     *   - Passes collapse into a single "N checks passed" node (expandable)
-     *
-     * Class nodes auto-expand if they have violations, stay collapsed if all passed.
-     * When "Sort by Severity" is active, classes with errors sort before classes
-     * with only warnings, etc.
-     */
     private void populateTreeView(List<AnalysisResult> results) {
         TreeItem<Object> root = resultsTreeView.getRoot();
         root.getChildren().clear();
 
-        // Group by class, preserving sort order
         Map<String, List<AnalysisResult>> byClass = results.stream()
                 .collect(Collectors.groupingBy(AnalysisResult::className,
                         LinkedHashMap::new, Collectors.toList()));
@@ -858,7 +853,6 @@ public class MainWindow {
             String className = entry.getKey();
             List<AnalysisResult> classResults = entry.getValue();
 
-            // Separate violations and passes
             List<AnalysisResult.Violation> violations = classResults.stream()
                     .filter(r -> r instanceof AnalysisResult.Violation)
                     .map(r -> (AnalysisResult.Violation) r)
@@ -869,21 +863,18 @@ public class MainWindow {
                     .map(r -> (AnalysisResult.Pass) r)
                     .collect(Collectors.toList());
 
-            // Compute severity counts for the class header badges
             int errors = (int) violations.stream().filter(v -> v.severity() == Severity.ERROR).count();
             int warnings = (int) violations.stream().filter(v -> v.severity() == Severity.WARNING).count();
             int advisories = (int) violations.stream().filter(v -> v.severity() == Severity.ADVISORY).count();
 
             ClassNodeData classData = new ClassNodeData(className, errors, warnings, advisories, passes.size());
             TreeItem<Object> classItem = new TreeItem<>(classData);
-            classItem.setExpanded(!violations.isEmpty());  // auto-expand if there are problems
+            classItem.setExpanded(!violations.isEmpty());
 
-            // Add violation children
             for (AnalysisResult.Violation v : violations) {
                 classItem.getChildren().add(new TreeItem<>(new ViolationNodeData(v)));
             }
 
-            // Add collapsed pass summary (with expandable details)
             if (!passes.isEmpty()) {
                 TreeItem<Object> passSummary = new TreeItem<>(new PassSummaryData(passes.size()));
                 for (AnalysisResult.Pass p : passes) {
@@ -896,19 +887,12 @@ public class MainWindow {
         }
     }
 
-    /**
-     * Populate the TableView from sorted/filtered results.
-     * Converts each AnalysisResult into a flat TableRowData for column display.
-     */
     private void populateTableView(List<AnalysisResult> results) {
         ObservableList<TableRowData> rows = FXCollections.observableArrayList(
-                results.stream()
-                        .map(TableRowData::from)
-                        .collect(Collectors.toList())
+                results.stream().map(TableRowData::from).collect(Collectors.toList())
         );
         resultsTableView.setItems(rows);
 
-        // If sort-by-severity is active, apply initial sort on the severity column
         if (sortBySeverity.isSelected() && !resultsTableView.getColumns().isEmpty()) {
             TableColumn<TableRowData, ?> sevCol = resultsTableView.getColumns().get(0);
             sevCol.setSortType(TableColumn.SortType.ASCENDING);
@@ -937,8 +921,7 @@ public class MainWindow {
 
     private List<AnalysisResult> sortBySeverityThenClass(List<AnalysisResult> results) {
         return results.stream()
-                .sorted(Comparator
-                        .comparingInt(this::severityOrdinal)
+                .sorted(Comparator.comparingInt(this::severityOrdinal)
                         .thenComparing(AnalysisResult::className)
                         .thenComparing(AnalysisResult::guidelineName))
                 .collect(Collectors.toList());
@@ -946,17 +929,14 @@ public class MainWindow {
 
     private List<AnalysisResult> sortByClassThenSeverity(List<AnalysisResult> results) {
         return results.stream()
-                .sorted(Comparator
-                        .comparing(AnalysisResult::className)
+                .sorted(Comparator.comparing(AnalysisResult::className)
                         .thenComparingInt(this::severityOrdinal)
                         .thenComparing(AnalysisResult::guidelineName))
                 .collect(Collectors.toList());
     }
 
     private int severityOrdinal(AnalysisResult result) {
-        if (result instanceof AnalysisResult.Violation v) {
-            return v.severity().ordinal();
-        }
+        if (result instanceof AnalysisResult.Violation v) return v.severity().ordinal();
         return 3;
     }
 
@@ -966,17 +946,12 @@ public class MainWindow {
 
     private void updateSummary(List<AnalysisResult> allResults) {
         long errors = allResults.stream()
-                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.ERROR)
-                .count();
+                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.ERROR).count();
         long warnings = allResults.stream()
-                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.WARNING)
-                .count();
+                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.WARNING).count();
         long advisories = allResults.stream()
-                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.ADVISORY)
-                .count();
-        long passes = allResults.stream()
-                .filter(AnalysisResult::passed)
-                .count();
+                .filter(r -> r instanceof AnalysisResult.Violation v && v.severity() == Severity.ADVISORY).count();
+        long passes = allResults.stream().filter(AnalysisResult::passed).count();
 
         summaryBar.getChildren().clear();
 
@@ -1002,9 +977,7 @@ public class MainWindow {
         return badge;
     }
 
-    private String plural(long count) {
-        return count == 1 ? "" : "s";
-    }
+    private String plural(long count) { return count == 1 ? "" : "s"; }
 
     // ==================================================================================
     // Utilities
