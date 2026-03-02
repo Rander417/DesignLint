@@ -4,16 +4,25 @@
  * JavaFX supports CSS styling similar to web CSS, but with -fx- prefixed properties.
  * This is one of the biggest improvements over Swing, where styling required
  * verbose Java code and custom renderers.
+ *
+ * === SEVERITY COLOR SYSTEM ===
+ * The color palette is used consistently across summary badges, filter toggles,
+ * and the results display (though results colors are set in Java via TextFlow).
+ *
+ *   ERROR:    #c62828 / #d32f2f  (red family)
+ *   WARNING:  #e65100 / #f57c00  (amber family)
+ *   ADVISORY: #1565c0 / #1976d2  (blue family)
+ *   PASS:     #2e7d32 / #388e3c  (green family)
  */
 
-/* Base styling for the entire application */
+/* ========== Base styling ========== */
 .root {
     -fx-font-family: "System";
     -fx-font-size: 13px;
     -fx-background-color: #ffffff;
 }
 
-/* Toolbar */
+/* ========== Toolbar ========== */
 .tool-bar {
     -fx-background-color: #f5f5f5;
     -fx-border-color: #e0e0e0;
@@ -21,7 +30,7 @@
     -fx-padding: 6 10 6 10;
 }
 
-/* Buttons */
+/* ========== Buttons ========== */
 .button {
     -fx-background-color: #4a90d9;
     -fx-text-fill: white;
@@ -43,7 +52,7 @@
     -fx-text-fill: #888888;
 }
 
-/* List Views (for classes and guidelines) */
+/* ========== List Views ========== */
 .list-view {
     -fx-border-color: #d0d0d0;
     -fx-border-radius: 3;
@@ -59,25 +68,25 @@
     -fx-text-fill: #333333;
 }
 
-/* Split pane divider */
+/* ========== Split pane ========== */
 .split-pane > .split-pane-divider {
     -fx-background-color: #e0e0e0;
     -fx-padding: 0 2 0 2;
 }
 
-/* ScrollPane */
+/* ========== ScrollPane ========== */
 .scroll-pane {
     -fx-border-color: #d0d0d0;
     -fx-border-radius: 3;
     -fx-background-radius: 3;
 }
 
-/* Labels */
+/* ========== Labels ========== */
 .label {
     -fx-text-fill: #333333;
 }
 
-/* Tooltips */
+/* ========== Tooltips ========== */
 .tooltip {
     -fx-background-color: #333333;
     -fx-text-fill: white;
@@ -86,7 +95,151 @@
     -fx-font-size: 12px;
 }
 
-/* Separator */
+/* ========== Separator ========== */
 .separator > .line {
     -fx-border-color: #e0e0e0;
+}
+
+
+/* ============================================================
+ * SUMMARY BAR — Phase 1: at-a-glance severity counts
+ * ============================================================ */
+.summary-bar {
+    -fx-background-color: #fafafa;
+    -fx-border-color: #e0e0e0;
+    -fx-border-width: 1;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+/* Base badge styling — pill-shaped labels with colored backgrounds */
+.summary-badge {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-padding: 2 10 2 10;
+}
+
+.badge-error {
+    -fx-background-color: #ffebee;
+    -fx-text-fill: #c62828;
+    -fx-border-color: #ef9a9a;
+    -fx-border-width: 1;
+}
+
+.badge-warning {
+    -fx-background-color: #fff3e0;
+    -fx-text-fill: #e65100;
+    -fx-border-color: #ffcc80;
+    -fx-border-width: 1;
+}
+
+.badge-advisory {
+    -fx-background-color: #e3f2fd;
+    -fx-text-fill: #1565c0;
+    -fx-border-color: #90caf9;
+    -fx-border-width: 1;
+}
+
+.badge-pass {
+    -fx-background-color: #e8f5e9;
+    -fx-text-fill: #2e7d32;
+    -fx-border-color: #a5d6a7;
+    -fx-border-width: 1;
+}
+
+
+/* ============================================================
+ * FILTER BAR — Phase 2: toggle buttons for show/hide and sort
+ * ============================================================
+ *
+ * Filter toggles use a "pressed = active/showing" metaphor.
+ * When selected, each button gets its severity color as background.
+ * When deselected, it grays out to indicate that category is hidden.
+ */
+.filter-bar {
+    -fx-background-color: #f8f8f8;
+    -fx-border-color: #e8e8e8;
+    -fx-border-width: 1;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+}
+
+/* Base filter toggle style — small, compact buttons */
+.filter-toggle {
+    -fx-font-size: 11px;
+    -fx-padding: 3 8 3 8;
+    -fx-background-radius: 3;
+    -fx-border-radius: 3;
+    -fx-cursor: hand;
+    -fx-background-color: #e0e0e0;
+    -fx-text-fill: #999999;
+    -fx-border-color: #cccccc;
+    -fx-border-width: 1;
+}
+
+/* --- Error filter toggle --- */
+.filter-error:selected {
+    -fx-background-color: #c62828;
+    -fx-text-fill: white;
+    -fx-border-color: #b71c1c;
+}
+.filter-error:selected:hover {
+    -fx-background-color: #b71c1c;
+}
+.filter-error:hover {
+    -fx-background-color: #d0d0d0;
+}
+
+/* --- Warning filter toggle --- */
+.filter-warning:selected {
+    -fx-background-color: #e65100;
+    -fx-text-fill: white;
+    -fx-border-color: #d84315;
+}
+.filter-warning:selected:hover {
+    -fx-background-color: #d84315;
+}
+.filter-warning:hover {
+    -fx-background-color: #d0d0d0;
+}
+
+/* --- Advisory filter toggle --- */
+.filter-advisory:selected {
+    -fx-background-color: #1565c0;
+    -fx-text-fill: white;
+    -fx-border-color: #0d47a1;
+}
+.filter-advisory:selected:hover {
+    -fx-background-color: #0d47a1;
+}
+.filter-advisory:hover {
+    -fx-background-color: #d0d0d0;
+}
+
+/* --- Pass filter toggle --- */
+.filter-pass:selected {
+    -fx-background-color: #2e7d32;
+    -fx-text-fill: white;
+    -fx-border-color: #1b5e20;
+}
+.filter-pass:selected:hover {
+    -fx-background-color: #1b5e20;
+}
+.filter-pass:hover {
+    -fx-background-color: #d0d0d0;
+}
+
+/* --- Sort toggle --- */
+.sort-toggle:selected {
+    -fx-background-color: #5c6bc0;
+    -fx-text-fill: white;
+    -fx-border-color: #3f51b5;
+}
+.sort-toggle:selected:hover {
+    -fx-background-color: #3f51b5;
+}
+.sort-toggle:hover {
+    -fx-background-color: #d0d0d0;
 }
